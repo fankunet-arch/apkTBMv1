@@ -33,7 +33,19 @@ data class PlaySchedule(
 )
 
 /**
- * 3. 全局配置表
+ * 3. 歌单详情表 (LocalPlaylist)
+ * 存储歌单的播放模式和歌曲ID列表，支持精准播放
+ */
+@Entity(tableName = "local_playlists")
+data class LocalPlaylist(
+    @PrimaryKey val id: Int,           // 歌单ID (对应服务器的 playlist_id)
+    val name: String,                  // 歌单名称 (可选，用于调试)
+    val songIdsJson: String,           // 歌曲ID列表，JSON 格式 "[1,2,3]"
+    val playMode: String               // 播放模式: "sequence" 或 "random"
+)
+
+/**
+ * 4. 全局配置表
  * 存储 MAC 地址、当前策略版本号等
  */
 @Entity(tableName = "app_config")
