@@ -48,6 +48,17 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // MAC 地址更新广播接收器 (修复首次启动竞态条件)
+    private val macUpdateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            val mac = intent?.getStringExtra("device_mac") ?: return
+            runOnUiThread {
+                binding.tvMacId.text = "MAC: $mac"
+                LogUtils.send(applicationContext, "✅ MAC 地址已刷新: $mac")
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
@@ -84,7 +95,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun initUI() {
-        binding.tvStatus.text = "服务已启动 (Service Started)"
+        binding.tvStatus.text = "🟢 服务运行中"
         binding.tvNowPlaying.text = "🎵 等待播放..."
 
         // 初始化日志显示
@@ -166,6 +177,13 @@ class MainActivity : AppCompatActivity() {
     private fun updateDownloadProgress(completed: Int, total: Int) {
         runOnUiThread {
             if (total > 0) {
+                // 更新状态文本
+                if (completed < total) {
+                    binding.tvStatus.text = "🔄 正在下载: $completed/$total"
+                } else {
+                    binding.tvStatus.text = "✅ 下载完成"
+                }
+
                 // 显示进度卡片
                 binding.cardDownloadProgress.visibility = View.VISIBLE
                 binding.tvDownloadProgressText.text = "正在同步资源: $completed/$total"
@@ -173,11 +191,12 @@ class MainActivity : AppCompatActivity() {
                 val progress = (completed * 100 / total).coerceIn(0, 100)
                 binding.progressBarDownload.progress = progress
 
-                // 下载完成后隐藏
+                // 下载完成后隐藏并恢复状态
                 if (completed >= total) {
                     mainScope.launch {
                         delay(2000) // 2秒后隐藏
                         binding.cardDownloadProgress.visibility = View.GONE
+                        binding.tvStatus.text = "🟢 服务运行中"
                     }
                 }
             } else {
@@ -209,8 +228,20 @@ class MainActivity : AppCompatActivity() {
             registerReceiver(downloadProgressReceiver, downloadProgressFilter)
         }
 
+        // 注册 MAC 更新接收器
+        val macUpdateFilter = IntentFilter(SyncManager.ACTION_MAC_UPDATED)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(macUpdateReceiver, macUpdateFilter, RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(macUpdateReceiver, macUpdateFilter)
+        }
+
         // 立即检测一次音量
         checkVolume()
+
+        // 查询当前播放状态 (修复 Activity 重建后的状态不同步)
+        val queryIntent = Intent(MusicService.ACTION_QUERY_STATUS)
+        sendBroadcast(queryIntent)
     }
 
     override fun onPause() {
@@ -219,6 +250,7 @@ class MainActivity : AppCompatActivity() {
         try {
             unregisterReceiver(nowPlayingReceiver)
             unregisterReceiver(downloadProgressReceiver)
+            unregisterReceiver(macUpdateReceiver)
         } catch (e: Exception) {
             // 忽略重复注销错误
         }

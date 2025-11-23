@@ -16,6 +16,7 @@ object SyncManager {
 
     // 广播 Action 常量
     const val ACTION_PLAYLIST_UPDATED = "com.toptea.tbm.ACTION_PLAYLIST_UPDATED"
+    const val ACTION_MAC_UPDATED = "com.toptea.tbm.ACTION_MAC_UPDATED"
 
     // 应用状态枚举 (用于动态心跳)
     enum class AppState {
@@ -46,6 +47,11 @@ object SyncManager {
                     mac = UUID.randomUUID().toString()
                     dao.setConfig(AppConfig("device_mac", mac))
                     LogUtils.send(context, "Generated New Device ID: $mac")
+
+                    // 发送 MAC 更新广播 (修复首次启动显示问题)
+                    val macIntent = Intent(ACTION_MAC_UPDATED)
+                    macIntent.putExtra("device_mac", mac)
+                    context.sendBroadcast(macIntent)
                 }
 
                 val currentVer = dao.getConfig("strategy_version") ?: "0"

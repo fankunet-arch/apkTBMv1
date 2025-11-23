@@ -40,6 +40,7 @@ class MusicService : Service() {
         const val ACTION_RELOAD = "com.toptea.tbm.RELOAD"
         const val ACTION_NOW_PLAYING = "com.toptea.tbm.ACTION_NOW_PLAYING"
         const val ACTION_KILL_SWITCH = "com.toptea.tbm.ACTION_KILL_SWITCH"
+        const val ACTION_QUERY_STATUS = "com.toptea.tbm.ACTION_QUERY_STATUS"
     }
 
     private var player: ExoPlayer? = null
@@ -50,6 +51,8 @@ class MusicService : Service() {
     private var currentPlayMode: String = "sequence"
     // 追踪播放队列是否为空 (用于冷启动优化)
     private var isPlaylistEmpty: Boolean = true
+    // 追踪当前播放的歌曲标题 (用于状态查询)
+    private var currentSongTitle: String = "等待播放..."
 
     // 精准停播守卫 (Precision Stop Watchdog)
     private var stopWatchdogJob: Job? = null
@@ -74,6 +77,18 @@ class MusicService : Service() {
         }
     }
 
+    // 状态查询广播接收器 (修复 Activity 重建后的状态不同步)
+    private val queryStatusReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            Log.d(TAG, "Received status query, sending current state: $currentSongTitle")
+
+            // 立即发送当前播放状态
+            val statusIntent = Intent(ACTION_NOW_PLAYING)
+            statusIntent.putExtra("song_title", currentSongTitle)
+            sendBroadcast(statusIntent)
+        }
+    }
+
     // 单曲就绪广播接收器 (边下边播核心)
     private val songReadyReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -93,6 +108,7 @@ class MusicService : Service() {
                     player?.addMediaItem(mediaItem)
                     player?.prepare()
                     isPlaylistEmpty = false
+                    currentSongTitle = songTitle // 更新当前播放标题
                     Log.i(TAG, "✨ Cold Start: First song ready, playback started!")
                     LogUtils.send(applicationContext, "✨ 首曲启动: $songTitle")
                     updateNotification("正在播放: $songTitle")
@@ -134,6 +150,9 @@ class MusicService : Service() {
                         val songTitle = it.localConfiguration?.uri?.lastPathSegment ?: "Unknown"
                         Log.d(TAG, "Now Playing: $songTitle")
 
+                        // 更新当前播放标题 (用于状态查询)
+                        currentSongTitle = songTitle
+
                         // 发送状态上报广播
                         val intent = Intent(ACTION_NOW_PLAYING)
                         intent.putExtra("song_title", songTitle)
@@ -164,7 +183,15 @@ class MusicService : Service() {
             registerReceiver(killSwitchReceiver, killSwitchFilter)
         }
 
-        // 6. 注册单曲就绪接收器 (边下边播核心)
+        // 6. 注册状态查询接收器 (修复 Activity 重建后的状态不同步)
+        val queryStatusFilter = IntentFilter(ACTION_QUERY_STATUS)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(queryStatusReceiver, queryStatusFilter, RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(queryStatusReceiver, queryStatusFilter)
+        }
+
+        // 7. 注册单曲就绪接收器 (边下边播核心)
         val songReadyFilter = IntentFilter(DownloadManager.ACTION_SONG_READY)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(songReadyReceiver, songReadyFilter, RECEIVER_NOT_EXPORTED)
@@ -172,7 +199,7 @@ class MusicService : Service() {
             registerReceiver(songReadyReceiver, songReadyFilter)
         }
 
-        // 7. 启动心跳轮询
+        // 8. 启动心跳轮询
         SyncManager.startPolling(this)
     }
 
@@ -407,6 +434,7 @@ class MusicService : Service() {
         try {
             unregisterReceiver(playlistUpdateReceiver)
             unregisterReceiver(killSwitchReceiver)
+            unregisterReceiver(queryStatusReceiver)
             unregisterReceiver(songReadyReceiver)
         } catch (e: Exception) {
             Log.e(TAG, "Error unregistering receivers: ${e.message}")

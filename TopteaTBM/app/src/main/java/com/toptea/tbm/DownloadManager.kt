@@ -94,7 +94,16 @@ object DownloadManager {
             }
 
             isDownloading = false
-            LogUtils.send(context, "下载完成: $completedCount/$totalCount 首歌曲")
+
+            // 发送最终进度 (确保 UI 显示正确的完成状态)
+            sendProgressBroadcast(context, completedCount, totalCount)
+
+            if (completedCount < totalCount) {
+                LogUtils.send(context, "⚠️ 下载部分完成: $completedCount/$totalCount 首歌曲 (${totalCount - completedCount} 首失败)")
+            } else {
+                LogUtils.send(context, "✅ 下载全部完成: $completedCount/$totalCount 首歌曲")
+            }
+
             Log.d(TAG, "<<< Download Service Finished")
         }
     }
@@ -126,8 +135,12 @@ object DownloadManager {
     // 辅助：校验 MD5
     private fun verifyMd5(file: File, expectedMd5: String): Boolean {
         if (!file.exists()) return false
-        // 如果服务器还没给MD5，或者给的是空，暂时先放行(为了兼容测试)，但在正式环境应该严格校验
-        if (expectedMd5.length < 30) return true
+
+        // 严格校验：如果服务器没有提供有效的 MD5，拒绝下载
+        if (expectedMd5.isEmpty() || expectedMd5.length < 32) {
+            Log.e(TAG, "Invalid MD5 hash provided: $expectedMd5")
+            return false
+        }
 
         return try {
             val buffer = ByteArray(8192)
