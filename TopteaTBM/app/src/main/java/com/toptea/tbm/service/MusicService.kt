@@ -107,8 +107,11 @@ class MusicService : Service() {
                     // 冷启动优化：第一首歌立即播放
                     player?.addMediaItem(mediaItem)
                     player?.prepare()
+                    player?.play() // ✅ [新增] 必须显式调用播放！
+                    
                     isPlaylistEmpty = false
                     currentSongTitle = songTitle // 更新当前播放标题
+                    
                     Log.i(TAG, "✨ Cold Start: First song ready, playback started!")
                     LogUtils.send(applicationContext, "✨ 首曲启动: $songTitle")
                     updateNotification("正在播放: $songTitle")
