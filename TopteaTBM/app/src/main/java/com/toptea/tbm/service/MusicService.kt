@@ -99,24 +99,21 @@ class MusicService : Service() {
             Log.d(TAG, "Song Ready Received: $songTitle (ID: $songId)")
             LogUtils.send(applicationContext, "🎵 新歌就绪: $songTitle")
 
-            // 动态插入播放队列
-            serviceScope.launch(Dispatchers.Main) {
-                val mediaItem = MediaItem.fromUri(songPath)
-
-                if (isPlaylistEmpty) {
-                    // 冷启动优化：第一首歌立即播放
-                    player?.addMediaItem(mediaItem)
-                    player?.prepare()
-                    player?.play() // ✅ [新增] 必须显式调用播放！
+            // 逻辑分支：
+            if (isPlaylistEmpty) {
+                // 🟢 场景 A：冷启动/空闲状态 (当前没在播)
+                // 修复副作用：不要直接播放！而是调用标准加载流程。
+                // loadAndPlayMusic 会负责检查“现在是否在播放时段内”。
+                // 如果是凌晨 3 点，它会检测到 invalid time slot，从而保持静默。
+                Log.i(TAG, "✨ First song ready. Triggering full schedule check...")
+                loadAndPlayMusic()
+            } else {
+                // 🔵 场景 B：已经在播放中
+                // 此时肯定是在营业时间（否则早就被停播守卫关掉了）
+                // 所以可以直接把新歌加入当前的播放队列
+                serviceScope.launch(Dispatchers.Main) {
+                    val mediaItem = MediaItem.fromUri(songPath)
                     
-                    isPlaylistEmpty = false
-                    currentSongTitle = songTitle // 更新当前播放标题
-                    
-                    Log.i(TAG, "✨ Cold Start: First song ready, playback started!")
-                    LogUtils.send(applicationContext, "✨ 首曲启动: $songTitle")
-                    updateNotification("正在播放: $songTitle")
-                } else {
-                    // 后续歌曲：插入队列末尾
                     if (currentPlayMode == "random") {
                         // 随机模式：插入随机位置
                         val randomIndex = (0 until (player?.mediaItemCount ?: 0) + 1).random()
@@ -125,7 +122,7 @@ class MusicService : Service() {
                         // 顺序模式：插入末尾
                         player?.addMediaItem(mediaItem)
                     }
-                    Log.i(TAG, "Added to playlist: $songTitle")
+                    Log.i(TAG, "Added to active playlist: $songTitle")
                 }
             }
         }
