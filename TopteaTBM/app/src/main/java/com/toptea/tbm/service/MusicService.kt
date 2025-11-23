@@ -92,34 +92,29 @@ class MusicService : Service() {
     // 单曲就绪广播接收器 (边下边播核心)
     private val songReadyReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            val songId = intent?.getIntExtra("song_id", -1) ?: return
-            val songPath = intent.getStringExtra("song_path") ?: return
-            val songTitle = intent.getStringExtra("song_title") ?: "Unknown"
+            // 确保 intent 不为空，并且能提取到 songPath
+            val songPath = intent?.getStringExtra("song_path") ?: return // ✅ FIX: 使用 ?. 进行安全调用
+            val songTitle = intent?.getStringExtra("song_title") ?: "Unknown" // ⬅️ 修正：这里也应该使用 ?.
 
-            Log.d(TAG, "Song Ready Received: $songTitle (ID: $songId)")
+            Log.d(TAG, "Song Ready Received: $songTitle")
             LogUtils.send(applicationContext, "🎵 新歌就绪: $songTitle")
 
             // 逻辑分支：
             if (isPlaylistEmpty) {
                 // 🟢 场景 A：冷启动/空闲状态 (当前没在播)
                 // 修复副作用：不要直接播放！而是调用标准加载流程。
-                // loadAndPlayMusic 会负责检查“现在是否在播放时段内”。
-                // 如果是凌晨 3 点，它会检测到 invalid time slot，从而保持静默。
                 Log.i(TAG, "✨ First song ready. Triggering full schedule check...")
                 loadAndPlayMusic()
             } else {
                 // 🔵 场景 B：已经在播放中
-                // 此时肯定是在营业时间（否则早就被停播守卫关掉了）
-                // 所以可以直接把新歌加入当前的播放队列
+                // 直接把新歌加入当前的播放队列（需在主线程操作播放器）
                 serviceScope.launch(Dispatchers.Main) {
                     val mediaItem = MediaItem.fromUri(songPath)
                     
                     if (currentPlayMode == "random") {
-                        // 随机模式：插入随机位置
                         val randomIndex = (0 until (player?.mediaItemCount ?: 0) + 1).random()
                         player?.addMediaItem(randomIndex, mediaItem)
                     } else {
-                        // 顺序模式：插入末尾
                         player?.addMediaItem(mediaItem)
                     }
                     Log.i(TAG, "Added to active playlist: $songTitle")
@@ -359,11 +354,25 @@ private fun loadAndPlayMusic() {
                 }
 
                 if (playbackList.isNotEmpty()) {
+                    // 使用播放列表中的第一个歌曲标题作为初始显示
+                    val firstSongTitle = playbackList.first().title 
+                    
                     player?.prepare()
                     player?.play() // 确保开始播放
                     isPlaylistEmpty = false
-                    // LogUtils.send(applicationContext, "✅ Playback started") // 减少日志刷屏
-                    updateNotification("正在播放: ${playlist.name}")
+
+                    // ✅ FIX 1：手动设置状态变量并发送广播给 Activity
+                    currentSongTitle = firstSongTitle
+                    val statusIntent = Intent(ACTION_NOW_PLAYING)
+                    statusIntent.putExtra("song_title", firstSongTitle)
+                    sendBroadcast(statusIntent)
+                    
+                    LogUtils.send(applicationContext, "✅ Playback started: ${songs.size} songs")
+                    updateNotification("正在播放: ${playlist.name} (${songs.size} 首)")
+                } else {
+                    isPlaylistEmpty = true
+                    LogUtils.send(applicationContext, "等待歌曲下载...")
+                    updateNotification("等待歌曲下载...")
                 }
             }
         }
