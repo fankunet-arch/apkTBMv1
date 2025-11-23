@@ -39,6 +39,15 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // 下载进度广播接收器
+    private val downloadProgressReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            val completed = intent?.getIntExtra("completed", 0) ?: 0
+            val total = intent?.getIntExtra("total", 0) ?: 0
+            updateDownloadProgress(completed, total)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
@@ -56,9 +65,10 @@ class MainActivity : AppCompatActivity() {
         // 4. 启动音量哨兵
         startVolumeSentinel()
 
-        // 5. 点击顶部卡片触发手动同步
-        binding.cardMacId.setOnClickListener {
+        // 5. 手动同步按钮点击事件
+        binding.btnManualSync.setOnClickListener {
             LogUtils.send(this, ">>> Manual Sync Triggered by User")
+            Toast.makeText(this, "正在连接总部...", Toast.LENGTH_SHORT).show()
             SyncManager.checkUpdate(this)
         }
 
@@ -153,6 +163,29 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun updateDownloadProgress(completed: Int, total: Int) {
+        runOnUiThread {
+            if (total > 0) {
+                // 显示进度卡片
+                binding.cardDownloadProgress.visibility = View.VISIBLE
+                binding.tvDownloadProgressText.text = "正在同步资源: $completed/$total"
+
+                val progress = (completed * 100 / total).coerceIn(0, 100)
+                binding.progressBarDownload.progress = progress
+
+                // 下载完成后隐藏
+                if (completed >= total) {
+                    mainScope.launch {
+                        delay(2000) // 2秒后隐藏
+                        binding.cardDownloadProgress.visibility = View.GONE
+                    }
+                }
+            } else {
+                binding.cardDownloadProgress.visibility = View.GONE
+            }
+        }
+    }
+
     override fun onResume() {
         super.onResume()
         // 注册日志接收器
@@ -168,6 +201,14 @@ class MainActivity : AppCompatActivity() {
             registerReceiver(nowPlayingReceiver, nowPlayingFilter)
         }
 
+        // 注册下载进度接收器
+        val downloadProgressFilter = IntentFilter(DownloadManager.ACTION_DOWNLOAD_PROGRESS)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(downloadProgressReceiver, downloadProgressFilter, RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(downloadProgressReceiver, downloadProgressFilter)
+        }
+
         // 立即检测一次音量
         checkVolume()
     }
@@ -177,6 +218,7 @@ class MainActivity : AppCompatActivity() {
         LocalBroadcastManager.getInstance(this).unregisterReceiver(logReceiver)
         try {
             unregisterReceiver(nowPlayingReceiver)
+            unregisterReceiver(downloadProgressReceiver)
         } catch (e: Exception) {
             // 忽略重复注销错误
         }

@@ -19,39 +19,62 @@
         app:cardElevation="0dp"
         app:layout_constraintTop_toTopOf="parent">
 
-        <LinearLayout
+        <androidx.constraintlayout.widget.ConstraintLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
             android:padding="16dp">
 
-            <TextView
-                android:layout_width="wrap_content"
+            <LinearLayout
+                android:id="@+id/layoutInfo"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:text="Dark Matrix Terminal"
-                android:textSize="18sp"
-                android:textStyle="bold"
-                android:textColor="#E5E5E5" />
+                android:orientation="vertical"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintEnd_toStartOf="@id/btnManualSync"
+                app:layout_constraintTop_toTopOf="parent">
 
-            <TextView
-                android:id="@+id/tvMacId"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:text="MAC: Loading..."
-                android:textSize="14sp"
-                android:textColor="#8E8E93"
-                android:fontFamily="monospace" />
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Dark Matrix Terminal"
+                    android:textSize="18sp"
+                    android:textStyle="bold"
+                    android:textColor="#E5E5E5" />
 
-            <TextView
-                android:id="@+id/tvStatus"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:text="初始化中..."
-                android:textSize="12sp"
-                android:textColor="#8E8E93" />
-        </LinearLayout>
+                <TextView
+                    android:id="@+id/tvMacId"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="MAC: Loading..."
+                    android:textSize="14sp"
+                    android:textColor="#8E8E93"
+                    android:fontFamily="monospace" />
+
+                <TextView
+                    android:id="@+id/tvStatus"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="初始化中..."
+                    android:textSize="12sp"
+                    android:textColor="#8E8E93" />
+            </LinearLayout>
+
+            <!-- 手动同步按钮 -->
+            <ImageButton
+                android:id="@+id/btnManualSync"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:src="@android:drawable/ic_popup_sync"
+                android:contentDescription="手动同步"
+                android:tint="#00C7BE"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintTop_toTopOf="parent"
+                app:layout_constraintBottom_toBottomOf="parent" />
+
+        </androidx.constraintlayout.widget.ConstraintLayout>
     </androidx.cardview.widget.CardView>
 
     <!-- 音量警告卡片 -->
@@ -78,6 +101,45 @@
             android:gravity="center" />
     </androidx.cardview.widget.CardView>
 
+    <!-- 下载进度卡片 -->
+    <androidx.cardview.widget.CardView
+        android:id="@+id/cardDownloadProgress"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:visibility="gone"
+        app:cardBackgroundColor="#1C1C1E"
+        app:cardCornerRadius="8dp"
+        app:cardElevation="0dp"
+        app:layout_constraintTop_toBottomOf="@id/cardVolumeWarning">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <TextView
+                android:id="@+id/tvDownloadProgressText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="正在同步资源: 0/0"
+                android:textSize="14sp"
+                android:textColor="#E5E5E5"
+                android:textStyle="bold" />
+
+            <ProgressBar
+                android:id="@+id/progressBarDownload"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="match_parent"
+                android:layout_height="4dp"
+                android:layout_marginTop="8dp"
+                android:progressTint="#00C7BE"
+                android:max="100"
+                android:progress="0" />
+        </LinearLayout>
+    </androidx.cardview.widget.CardView>
+
     <!-- 日志区域标题 -->
     <TextView
         android:id="@+id/tvLogsLabel"
@@ -89,7 +151,7 @@
         android:textSize="12sp"
         android:textColor="#8E8E93"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/cardVolumeWarning" />
+        app:layout_constraintTop_toBottomOf="@id/cardDownloadProgress" />
 
     <!-- 日志滚动区域 -->
     <ScrollView
