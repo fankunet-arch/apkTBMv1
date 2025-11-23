@@ -44,7 +44,11 @@ class MainActivity : AppCompatActivity() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val completed = intent?.getIntExtra("completed", 0) ?: 0
             val total = intent?.getIntExtra("total", 0) ?: 0
-            updateDownloadProgress(completed, total)
+            if (intent?.action == DownloadManager.ACTION_DOWNLOAD_FINISHED) {
+                handleDownloadFinished(completed, total)
+            } else {
+                updateDownloadProgress(completed, total)
+            }
         }
     }
 
@@ -190,12 +194,35 @@ class MainActivity : AppCompatActivity() {
 
                 val progress = (completed * 100 / total).coerceIn(0, 100)
                 binding.progressBarDownload.progress = progress
+            } else {
+                binding.cardDownloadProgress.visibility = View.GONE
+            }
+        }
+    }
 
-                // 下载完成后隐藏并恢复状态
-                if (completed >= total) {
-                    mainScope.launch {
-                        delay(2000) // 2秒后隐藏
-                        binding.cardDownloadProgress.visibility = View.GONE
+    private fun handleDownloadFinished(completed: Int, total: Int) {
+        runOnUiThread {
+            if (total > 0) {
+                // 1. 最终更新一次进度条
+                binding.progressBarDownload.progress = (completed * 100 / total).coerceIn(0, 100)
+
+                // 2. 更新状态文本
+                if (completed < total) {
+                    binding.tvStatus.text = "⚠️ 下载结束 (${total - completed}首失败)"
+                    binding.tvDownloadProgressText.text = "下载结束: $completed/$total (有失败)"
+                } else {
+                    binding.tvStatus.text = "✅ 下载完成"
+                    binding.tvDownloadProgressText.text = "下载完成: $completed/$total"
+                }
+
+                // 3. 延迟后隐藏卡片并更新最终状态
+                mainScope.launch {
+                    delay(2000) // 2秒后隐藏
+                    binding.cardDownloadProgress.visibility = View.GONE
+
+                    if (completed < total) {
+                        binding.tvStatus.text = "🟡 部分失败"
+                    } else {
                         binding.tvStatus.text = "🟢 服务运行中"
                     }
                 }
@@ -221,7 +248,10 @@ class MainActivity : AppCompatActivity() {
         }
 
         // 注册下载进度接收器
-        val downloadProgressFilter = IntentFilter(DownloadManager.ACTION_DOWNLOAD_PROGRESS)
+        val downloadProgressFilter = IntentFilter().apply {
+            addAction(DownloadManager.ACTION_DOWNLOAD_PROGRESS)
+            addAction(DownloadManager.ACTION_DOWNLOAD_FINISHED)
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(downloadProgressReceiver, downloadProgressFilter, RECEIVER_NOT_EXPORTED)
         } else {
