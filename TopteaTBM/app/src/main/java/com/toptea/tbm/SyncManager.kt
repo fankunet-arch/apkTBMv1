@@ -86,6 +86,15 @@ object SyncManager {
 
             } catch (e: Exception) {
                 LogUtils.send(context, "Sync Failed: ${e.message}")
+
+                // 捕获原始响应内容，方便定位接口返回的 HTML/错误提示导致的 JSON 解析异常
+                runCatching {
+                    val raw = NetworkClient.fetchRawCheckUpdate(request)
+                    if (!raw.isNullOrBlank()) {
+                        LogUtils.send(context, "Raw API response (first 200 chars): ${raw.take(200)}")
+                    }
+                }
+
                 e.printStackTrace()
             }
         }
