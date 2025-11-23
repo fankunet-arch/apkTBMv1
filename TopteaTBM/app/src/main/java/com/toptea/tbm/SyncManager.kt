@@ -1,14 +1,21 @@
 package com.toptea.tbm
 
 import android.content.Context
+import android.content.Intent
 import com.google.gson.Gson
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.UUID
 
 object SyncManager {
     private val gson = Gson()
+    private var pollingJob: Job? = null
+
+    // 广播 Action 常量
+    const val ACTION_PLAYLIST_UPDATED = "com.toptea.tbm.ACTION_PLAYLIST_UPDATED"
 
     // 核心入口：执行一次完整的同步检查
     fun checkUpdate(context: Context) {
@@ -115,14 +122,61 @@ object SyncManager {
             ))
         }
 
-        // C. 更新版本
+        // C. 处理歌单 (Playlists)
+        dao.clearAllPlaylists()
+        var playlistCount = 0
+        config.playlists.forEach { (playlistIdStr, remotePlaylist) ->
+            val playlistId = playlistIdStr.toIntOrNull() ?: return@forEach
+            val playlist = LocalPlaylist(
+                id = playlistId,
+                name = "Playlist_$playlistId",
+                songIdsJson = gson.toJson(remotePlaylist.ids),
+                playMode = remotePlaylist.mode
+            )
+            dao.insertOrUpdatePlaylist(playlist)
+            playlistCount++
+        }
+        if (playlistCount > 0) LogUtils.send(context, "Loaded $playlistCount playlists.")
+
+        // D. 更新版本
         if (newVersion != null) {
             dao.setConfig(AppConfig("strategy_version", newVersion))
             LogUtils.send(context, "Strategy updated to: $newVersion")
         }
 
-        // D. 触发下载
+        // E. 触发下载
         LogUtils.send(context, "Starting Download Manager...")
         DownloadManager.startDownload(context)
+
+        // F. 发送热更广播 (通知播放器刷新)
+        val intent = Intent(ACTION_PLAYLIST_UPDATED)
+        context.sendBroadcast(intent)
+        LogUtils.send(context, "Playlist update broadcast sent.")
+    }
+
+    /**
+     * 启动心跳轮询机制 (30分钟一次)
+     * 确保断网重连后能自动恢复
+     */
+    fun startPolling(context: Context) {
+        // 先停止旧的 Job (防止重复启动)
+        pollingJob?.cancel()
+
+        pollingJob = CoroutineScope(Dispatchers.IO).launch {
+            LogUtils.send(context, "Polling service started. Interval: 30 min")
+            while (true) {
+                delay(30 * 60 * 1000L) // 30 分钟
+                LogUtils.send(context, ">>> Auto Sync Triggered (Polling)")
+                checkUpdate(context)
+            }
+        }
+    }
+
+    /**
+     * 停止心跳轮询
+     */
+    fun stopPolling() {
+        pollingJob?.cancel()
+        pollingJob = null
     }
 }

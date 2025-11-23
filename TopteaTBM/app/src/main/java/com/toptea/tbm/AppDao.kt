@@ -36,6 +36,19 @@ interface AppDao {
     @Query("DELETE FROM play_schedules")
     suspend fun clearAllSchedules()
 
+    // --- 歌单操作 (LocalPlaylist) ---
+    @Query("SELECT * FROM local_playlists WHERE id = :id")
+    suspend fun getPlaylistById(id: Int): LocalPlaylist?
+
+    @Query("SELECT * FROM local_playlists")
+    suspend fun getAllPlaylists(): List<LocalPlaylist>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertOrUpdatePlaylist(playlist: LocalPlaylist)
+
+    @Query("DELETE FROM local_playlists")
+    suspend fun clearAllPlaylists()
+
     // --- 配置操作 ---
     @Query("SELECT value FROM app_config WHERE `key` = :key")
     suspend fun getConfig(key: String): String?

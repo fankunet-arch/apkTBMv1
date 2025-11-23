@@ -6,8 +6,8 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 
 @Database(
-    entities = [LocalSong::class, PlaySchedule::class, AppConfig::class],
-    version = 1,
+    entities = [LocalSong::class, PlaySchedule::class, LocalPlaylist::class, AppConfig::class],
+    version = 2,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -23,7 +23,9 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "toptea_tbm_db"
-                ).build()
+                )
+                    .fallbackToDestructiveMigration() // 清除旧测试数据，强制重建
+                    .build()
                 INSTANCE = instance
                 instance
             }
