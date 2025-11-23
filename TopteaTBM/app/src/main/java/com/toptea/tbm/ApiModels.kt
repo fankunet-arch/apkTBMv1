@@ -27,8 +27,7 @@ data class FullConfig(
 
 data class RemoteSong(
     val id: Int,
-    // ✅ FIX：新增 title 字段，用于接收人可读的歌曲名称
-    val title: String, 
+    @SerializedName("title") val title: String, // ✅ [新增] 接收人可读标题
     @SerializedName("md5") val md5: String,
     @SerializedName("url") val url: String,
     @SerializedName("size") val size: Long

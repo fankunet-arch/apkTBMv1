@@ -92,19 +92,18 @@ object SyncManager {
     }
 
     private suspend fun processConfig(context: Context, dao: AppDao, config: FullConfig, newVersion: String?) {
-        // A. 处理歌曲
+	// A. 处理歌曲
         var newCount = 0
         config.resources.forEach { remoteSong ->
             val local = dao.getSongById(remoteSong.id)
             if (local == null) {
                 val newSong = LocalSong(
                     id = remoteSong.id,
-                    // ✅ FIX：从 RemoteSong.title 映射人可读名称到本地数据库
-                    title = remoteSong.title, 
+                    title = remoteSong.title, // ✅ [修复点] 使用 API 返回的真实标题
                     md5 = remoteSong.md5,
                     downloadUrl = remoteSong.url,
                     fileSize = remoteSong.size,
-                    status = 0 // 状态 0: 未下载
+                    status = 0
                 )
                 dao.insertOrUpdateSong(newSong)
                 newCount++

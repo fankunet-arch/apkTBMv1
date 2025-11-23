@@ -93,7 +93,7 @@ class MusicService : Service() {
         }
     }
 
-    // 单曲就绪广播接收器 (边下边播核心)
+    // 单曲就绪广播接收器 (边下边播核心 - 解决下载后非播放时段启动问题)
     private val songReadyReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             // 确保 intent 不为空，并且能提取到 songPath (解决编译错误)
@@ -150,18 +150,14 @@ class MusicService : Service() {
 
             // 添加播放器监听器 - 实现状态上报
             addListener(object : Player.Listener {
-
                 override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                     mediaItem?.let {
-                        // 1. 尝试从我们注入的元数据中获取标题
+                        // ✅ FIX 1 (UI)：从元数据中提取标题，确保 UI 显示人可读的名称
                         val metaTitle = it.mediaMetadata.title
                         
-                        // 2. 检查标题是否有效 (不为 null 且不为空)
                         val songTitle = if (!metaTitle.isNullOrEmpty()) {
                             metaTitle.toString()
                         } else {
-                            // 3. 如果元数据无效，回退到 URI (可能拿到 MD5 或 ID)
-                            Log.w(TAG, "Metadata title missing. Falling back to URI segment.")
                             it.localConfiguration?.uri?.lastPathSegment ?: "Unknown"
                         }
 
@@ -176,14 +172,13 @@ class MusicService : Service() {
                         LogUtils.send(applicationContext, "▶️ Now Playing: $songTitle")
                     }
                 }
-
             })
         }
 
         // 3. 创建通知渠道 (Android 8.0+)
         createNotificationChannel()
 
-        // 4. 注册广播接收器 (4-7 保持不变)
+        // 4. 注册广播接收器 (保持不变)
         val playlistFilter = IntentFilter(SyncManager.ACTION_PLAYLIST_UPDATED)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(playlistUpdateReceiver, playlistFilter, RECEIVER_NOT_EXPORTED)
@@ -191,7 +186,7 @@ class MusicService : Service() {
             registerReceiver(playlistUpdateReceiver, playlistFilter)
         }
 
-        // 5. 注册紧急熔断接收器
+        // 5. 注册紧急熔断接收器 (保持不变)
         val killSwitchFilter = IntentFilter(ACTION_KILL_SWITCH)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(killSwitchReceiver, killSwitchFilter, RECEIVER_NOT_EXPORTED)
@@ -199,7 +194,7 @@ class MusicService : Service() {
             registerReceiver(killSwitchReceiver, killSwitchFilter)
         }
 
-        // 6. 注册状态查询接收器
+        // 6. 注册状态查询接收器 (保持不变)
         val queryStatusFilter = IntentFilter(ACTION_QUERY_STATUS)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(queryStatusReceiver, queryStatusFilter, RECEIVER_NOT_EXPORTED)
@@ -207,7 +202,7 @@ class MusicService : Service() {
             registerReceiver(queryStatusReceiver, queryStatusFilter)
         }
 
-        // 7. 注册单曲就绪接收器
+        // 7. 注册单曲就绪接收器 (保持不变)
         val songReadyFilter = IntentFilter(DownloadManager.ACTION_SONG_READY)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(songReadyReceiver, songReadyFilter, RECEIVER_NOT_EXPORTED)
@@ -222,7 +217,7 @@ class MusicService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.d(TAG, "onStartCommand: Received Action ${intent?.action}")
 
-        // 4. 启动前台服务 (必须在5秒内调用，否则Crash)
+        // 4. 启动前台服务 
         val notification = createNotification("Toptea BGM 服务运行中")
         startForeground(NOTIFICATION_ID, notification)
 
@@ -240,14 +235,22 @@ private fun loadAndPlayMusic() {
         val db = AppDatabase.getDatabase(applicationContext)
         val dao = db.appDao()
 
-        // A. 计算今天该播什么 (PlaySchedule)
+        // 1. 尝试匹配特例/节假日 (优先级高)
         val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
         var schedule = dao.getScheduleByDate(todayStr) 
 
         if (schedule == null) {
+            // 2. 如果没有特例/节假日，则匹配周循环 (优先级低)
             val cal = Calendar.getInstance()
-            val dayOfWeek = cal.get(Calendar.DAY_OF_WEEK) 
-            val weekdayIndex = if (dayOfWeek == 1) 7 else dayOfWeek - 1
+            val dayOfWeek = cal.get(Calendar.DAY_OF_WEEK) // ⬅️ Java/Android: Sun=1, Mon=2, ..., Sat=7
+            
+            // ✅ FIX 2 (排期)：修正日期转换逻辑，确保正确映射到 WEEKDAY_1 (Mon) 到 WEEKDAY_7 (Sun)。
+            // (1+5)%7+1 = 7 (Sun)
+            // (2+5)%7+1 = 1 (Mon)
+            // (3+5)%7+1 = 2 (Tue)
+            val weekdayIndex = (dayOfWeek + 5) % 7 + 1 
+            
+            Log.i(TAG, "Fallback check: Today is dayOfWeek=$dayOfWeek. Calculated weekdayIndex=$weekdayIndex.")
             schedule = dao.getScheduleByDate("WEEKDAY_$weekdayIndex")
         }
 
@@ -270,7 +273,7 @@ private fun loadAndPlayMusic() {
             return@launch
         }
 
-        // --- FIX 1: 多时段智能匹配逻辑 ---
+        // --- 多时段智能匹配逻辑 ---
         val nowFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
         val nowTimeStr = nowFormat.format(Date()) 
         
@@ -288,7 +291,7 @@ private fun loadAndPlayMusic() {
             }
             return@launch
         }
-        // --- END FIX 1 ---
+        // --- END 多时段逻辑 ---
 
         val playlistId = currentSlot.playlist_id
         Log.i(TAG, "Target Playlist ID: $playlistId for slot ${currentSlot.start}-${currentSlot.end}")
@@ -331,7 +334,7 @@ private fun loadAndPlayMusic() {
             return@launch
         }
 
-        // --- FIX 2: ExoPlayer Threading Check ---
+        // --- FIX 4: ExoPlayer Threading Check ---
         val isPlaying = withContext(Dispatchers.Main) {
             player?.isPlaying == true
         }
@@ -340,7 +343,7 @@ private fun loadAndPlayMusic() {
         if (isPlaying && !isPlaylistEmpty) {
             // 继续播放，不重置播放列表
         }
-        // --- END FIX 2 ---
+        // --- END FIX 4 ---
 
         Log.i(TAG, "Found ${songs.size}/${songIds.size} songs ready to play.")
         LogUtils.send(applicationContext, "Loaded ${songs.size} songs for playback")
@@ -352,11 +355,11 @@ private fun loadAndPlayMusic() {
             songs 
         }
 
-        // G. 加载到播放器 (ExoPlayer) + FIX 4 (Metadata & Initial Broadcast)
+        // G. 加载到播放器 (ExoPlayer) + FIX 1B (Metadata & Initial Broadcast)
         withContext(Dispatchers.Main) {
             player?.clearMediaItems()
             playbackList.forEach { song ->
-                // ✅ FIX 4A：创建 MediaMetadata，将 song.title 嵌入到 MediaItem
+                // ✅ FIX 1B：创建 MediaMetadata，将 song.title 嵌入到 MediaItem
                 val metadata = androidx.media3.common.MediaMetadata.Builder()
                     .setTitle(song.title) 
                     .build()
@@ -376,7 +379,7 @@ private fun loadAndPlayMusic() {
                 player?.play() 
                 isPlaylistEmpty = false
 
-                // ✅ FIX 4B：首次播放时，发送正确的歌曲标题给 UI
+                // ✅ FIX 1B：首次播放时，发送正确的歌曲标题给 UI
                 currentSongTitle = firstSongTitle
                 val statusIntent = Intent(ACTION_NOW_PLAYING)
                 statusIntent.putExtra("song_title", firstSongTitle)
@@ -434,7 +437,7 @@ private fun loadAndPlayMusic() {
                 delay(deltaMillis)
 
                 // 时间到！执行停播
-                withContext(Dispatchers.Main) { // ⬅️ 线程安全修复
+                withContext(Dispatchers.Main) { 
                     Log.w(TAG, "🛑 Stop Watchdog triggered! Stopping playback at $endTimeStr")
                     LogUtils.send(applicationContext, "🛑 播放时段结束 ($endTimeStr)")
 
