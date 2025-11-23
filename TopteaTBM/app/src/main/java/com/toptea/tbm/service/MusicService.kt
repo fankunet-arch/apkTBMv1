@@ -435,7 +435,7 @@ private fun loadAndPlayMusic() {
                 LogUtils.send(applicationContext, "⏰ 当前时段已结束")
 
                 // ✅ 修复: 立即停止播放并重置状态
-                withContext(Dispatchers.Main) {
+                serviceScope.launch(Dispatchers.Main) {
                     player?.stop()
                 }
                 currentSongTitle = "等待播放..."
