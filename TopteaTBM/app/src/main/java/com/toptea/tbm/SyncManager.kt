@@ -35,6 +35,7 @@ object SyncManager {
     // 核心入口：执行一次完整的同步检查
     fun checkUpdate(context: Context) {
         CoroutineScope(Dispatchers.IO).launch {
+            var lastRequest: CheckUpdateRequest? = null
             try {
                 LogUtils.send(context, ">>> Starting Sync Check...")
 
@@ -59,6 +60,7 @@ object SyncManager {
                 // 2. 发起网络请求
                 LogUtils.send(context, "Connecting to server... (MAC: ${mac?.take(8)}...)")
                 val request = CheckUpdateRequest(mac!!, currentVer)
+                lastRequest = request
 
                 val response = NetworkClient.apiService.checkUpdate(request)
 
@@ -89,7 +91,7 @@ object SyncManager {
 
                 // 捕获原始响应内容，方便定位接口返回的 HTML/错误提示导致的 JSON 解析异常
                 runCatching {
-                    val raw = NetworkClient.fetchRawCheckUpdate(request)
+                    val raw = lastRequest?.let { NetworkClient.fetchRawCheckUpdate(it) }
                     if (!raw.isNullOrBlank()) {
                         LogUtils.send(context, "Raw API response (first 200 chars): ${raw.take(200)}")
                     }
