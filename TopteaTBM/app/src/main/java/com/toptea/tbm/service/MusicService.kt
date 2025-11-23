@@ -249,7 +249,7 @@ class MusicService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Toptea SoundMatrix")
             .setContentText(contentText)
-            .setSmallIcon(R.mipmap.ic_launcher) // 确保图标存在
+            .setSmallIcon(R.drawable.ic_launcher_foreground) // 使用前景色矢量图
             .setContentIntent(pendingIntent)
             .setOngoing(true) // 禁止划掉
             .build()

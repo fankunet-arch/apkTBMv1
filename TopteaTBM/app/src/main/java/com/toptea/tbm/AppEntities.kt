@@ -1,5 +1,6 @@
 package com.toptea.tbm
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
@@ -50,6 +51,7 @@ data class LocalPlaylist(
  */
 @Entity(tableName = "app_config")
 data class AppConfig(
+    @ColumnInfo(name = "config_key") // 避开 SQL 保留关键字
     @PrimaryKey val key: String,
     val value: String
 )
