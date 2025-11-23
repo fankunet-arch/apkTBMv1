@@ -20,6 +20,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.toptea.tbm.AppDatabase
+import com.toptea.tbm.DownloadManager
 import com.toptea.tbm.LogUtils
 import com.toptea.tbm.MainActivity
 import com.toptea.tbm.R // 确保 R 引用正确
@@ -45,6 +46,14 @@ class MusicService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private val serviceScope = CoroutineScope(Dispatchers.IO + Job())
 
+    // 追踪当前播放模式 (sequence/random)
+    private var currentPlayMode: String = "sequence"
+    // 追踪播放队列是否为空 (用于冷启动优化)
+    private var isPlaylistEmpty: Boolean = true
+
+    // 精准停播守卫 (Precision Stop Watchdog)
+    private var stopWatchdogJob: Job? = null
+
     // 热重载广播接收器
     private val playlistUpdateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -62,6 +71,44 @@ class MusicService : Service() {
             player?.stop()
             player?.clearMediaItems()
             updateNotification("设备已被阻止 (Device Blocked)")
+        }
+    }
+
+    // 单曲就绪广播接收器 (边下边播核心)
+    private val songReadyReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            val songId = intent?.getIntExtra("song_id", -1) ?: return
+            val songPath = intent.getStringExtra("song_path") ?: return
+            val songTitle = intent.getStringExtra("song_title") ?: "Unknown"
+
+            Log.d(TAG, "Song Ready Received: $songTitle (ID: $songId)")
+            LogUtils.send(applicationContext, "🎵 新歌就绪: $songTitle")
+
+            // 动态插入播放队列
+            serviceScope.launch(Dispatchers.Main) {
+                val mediaItem = MediaItem.fromUri(songPath)
+
+                if (isPlaylistEmpty) {
+                    // 冷启动优化：第一首歌立即播放
+                    player?.addMediaItem(mediaItem)
+                    player?.prepare()
+                    isPlaylistEmpty = false
+                    Log.i(TAG, "✨ Cold Start: First song ready, playback started!")
+                    LogUtils.send(applicationContext, "✨ 首曲启动: $songTitle")
+                    updateNotification("正在播放: $songTitle")
+                } else {
+                    // 后续歌曲：插入队列末尾
+                    if (currentPlayMode == "random") {
+                        // 随机模式：插入随机位置
+                        val randomIndex = (0 until (player?.mediaItemCount ?: 0) + 1).random()
+                        player?.addMediaItem(randomIndex, mediaItem)
+                    } else {
+                        // 顺序模式：插入末尾
+                        player?.addMediaItem(mediaItem)
+                    }
+                    Log.i(TAG, "Added to playlist: $songTitle")
+                }
+            }
         }
     }
 
@@ -117,7 +164,15 @@ class MusicService : Service() {
             registerReceiver(killSwitchReceiver, killSwitchFilter)
         }
 
-        // 6. 启动心跳轮询
+        // 6. 注册单曲就绪接收器 (边下边播核心)
+        val songReadyFilter = IntentFilter(DownloadManager.ACTION_SONG_READY)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(songReadyReceiver, songReadyFilter, RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(songReadyReceiver, songReadyFilter)
+        }
+
+        // 7. 启动心跳轮询
         SyncManager.startPolling(this)
     }
 
@@ -176,8 +231,12 @@ class MusicService : Service() {
                 return@launch
             }
 
-            val playlistId = slots[0].playlist_id
+            val currentSlot = slots[0]
+            val playlistId = currentSlot.playlist_id
             Log.i(TAG, "Target Playlist ID: $playlistId")
+
+            // 🔥 精准停播守卫：计算距离结束时间的毫秒差
+            setupStopWatchdog(currentSlot.end)
 
             // C. 查询歌单详情 (LocalPlaylist)
             val playlist = dao.getPlaylistById(playlistId)
@@ -190,6 +249,9 @@ class MusicService : Service() {
 
             Log.i(TAG, "Loaded Playlist: ${playlist.name} (Mode: ${playlist.playMode})")
             LogUtils.send(applicationContext, "Playlist: ${playlist.name} (${playlist.playMode})")
+
+            // 保存当前播放模式
+            currentPlayMode = playlist.playMode
 
             // D. 解析歌曲ID列表
             val songIdsType = object : TypeToken<List<Int>>() {}.type
@@ -231,10 +293,80 @@ class MusicService : Service() {
                     val item = MediaItem.fromUri(song.localPath!!)
                     player?.addMediaItem(item)
                 }
-                player?.prepare()
-                LogUtils.send(applicationContext, "✅ Playback started: ${songs.size} songs")
-                updateNotification("正在播放: ${playlist.name} (${songs.size} 首)")
+
+                if (playbackList.isNotEmpty()) {
+                    player?.prepare()
+                    isPlaylistEmpty = false
+                    LogUtils.send(applicationContext, "✅ Playback started: ${songs.size} songs")
+                    updateNotification("正在播放: ${playlist.name} (${songs.size} 首)")
+                } else {
+                    isPlaylistEmpty = true
+                    LogUtils.send(applicationContext, "等待歌曲下载...")
+                    updateNotification("等待歌曲下载...")
+                }
             }
+        }
+    }
+
+    /**
+     * 精准停播守卫 (Precision Stop Watchdog)
+     * 在指定的结束时间自动停止播放，并触发策略检查
+     */
+    private fun setupStopWatchdog(endTimeStr: String) {
+        // 取消旧的守卫任务
+        stopWatchdogJob?.cancel()
+
+        try {
+            // 解析结束时间 (格式: "HH:mm" 例如 "22:00")
+            val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
+            val currentTime = Calendar.getInstance()
+
+            // 构造今天的结束时间点
+            val endTimeParts = endTimeStr.split(":")
+            val endHour = endTimeParts[0].toInt()
+            val endMinute = endTimeParts[1].toInt()
+
+            val endTime = Calendar.getInstance().apply {
+                set(Calendar.HOUR_OF_DAY, endHour)
+                set(Calendar.MINUTE, endMinute)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
+
+            // 如果结束时间已经过了，说明是明天的时间段（或者已经结束）
+            val deltaMillis = endTime.timeInMillis - currentTime.timeInMillis
+
+            if (deltaMillis <= 0) {
+                Log.w(TAG, "End time already passed or invalid: $endTimeStr")
+                LogUtils.send(applicationContext, "⏰ 当前时段已结束")
+                return
+            }
+
+            Log.i(TAG, "Stop Watchdog armed: will stop in ${deltaMillis / 1000}s (at $endTimeStr)")
+            LogUtils.send(applicationContext, "⏰ 停播定时器已设置: $endTimeStr")
+
+            // 启动定时任务
+            stopWatchdogJob = serviceScope.launch {
+                delay(deltaMillis)
+
+                // 时间到！执行停播
+                withContext(Dispatchers.Main) {
+                    Log.w(TAG, "🛑 Stop Watchdog triggered! Stopping playback at $endTimeStr")
+                    LogUtils.send(applicationContext, "🛑 播放时段结束 ($endTimeStr)")
+
+                    player?.stop()
+                    updateNotification("播放已停止 (时段结束)")
+                }
+
+                // 立即检查更新，看看是否有后续时段
+                Log.i(TAG, "Checking for next time slot...")
+                LogUtils.send(applicationContext, ">>> 检查后续播放计划...")
+                SyncManager.checkUpdate(applicationContext)
+            }
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to setup Stop Watchdog: ${e.message}")
+            LogUtils.send(applicationContext, "⚠️ 停播定时器设置失败: ${e.message}")
         }
     }
 
@@ -275,11 +407,16 @@ class MusicService : Service() {
         try {
             unregisterReceiver(playlistUpdateReceiver)
             unregisterReceiver(killSwitchReceiver)
+            unregisterReceiver(songReadyReceiver)
         } catch (e: Exception) {
             Log.e(TAG, "Error unregistering receivers: ${e.message}")
         }
         // 停止心跳轮询
         SyncManager.stopPolling()
+        // 取消精准停播守卫
+        stopWatchdogJob?.cancel()
+        // 取消协程作用域
+        serviceScope.cancel()
         // 释放资源
         player?.release()
         wakeLock?.release()

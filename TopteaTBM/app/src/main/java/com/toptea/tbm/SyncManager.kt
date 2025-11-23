@@ -17,6 +17,20 @@ object SyncManager {
     // 广播 Action 常量
     const val ACTION_PLAYLIST_UPDATED = "com.toptea.tbm.ACTION_PLAYLIST_UPDATED"
 
+    // 应用状态枚举 (用于动态心跳)
+    enum class AppState {
+        STABLE,      // 稳定模式 - 30分钟心跳
+        DOWNLOADING, // 下载模式 - 1分钟心跳
+        IDLE         // 空闲模式
+    }
+
+    // 当前应用状态
+    private var currentState: AppState = AppState.STABLE
+
+    // 心跳间隔常量 (毫秒)
+    private const val HEARTBEAT_STABLE = 30 * 60 * 1000L  // 30分钟
+    private const val HEARTBEAT_FAST = 1 * 60 * 1000L     // 1分钟
+
     // 核心入口：执行一次完整的同步检查
     fun checkUpdate(context: Context) {
         CoroutineScope(Dispatchers.IO).launch {
@@ -146,6 +160,18 @@ object SyncManager {
 
         // E. 触发下载
         LogUtils.send(context, "Starting Download Manager...")
+
+        // 检查是否有待下载的歌曲，切换到快速心跳模式
+        val db = AppDatabase.getDatabase(context)
+        val pendingCount = db.appDao().getPendingSongs().size
+
+        if (pendingCount > 0) {
+            currentState = AppState.DOWNLOADING
+            LogUtils.send(context, "⚡ 切换到快速心跳模式 (${pendingCount}首待下载)")
+            // 重启轮询以应用新的心跳间隔
+            restartPolling(context)
+        }
+
         DownloadManager.startDownload(context)
 
         // F. 发送热更广播 (通知播放器刷新)
@@ -155,7 +181,7 @@ object SyncManager {
     }
 
     /**
-     * 启动心跳轮询机制 (30分钟一次)
+     * 启动心跳轮询机制 (动态心跳调度)
      * 确保断网重连后能自动恢复
      */
     fun startPolling(context: Context) {
@@ -163,11 +189,57 @@ object SyncManager {
         pollingJob?.cancel()
 
         pollingJob = CoroutineScope(Dispatchers.IO).launch {
-            LogUtils.send(context, "Polling service started. Interval: 30 min")
+            val intervalName = if (currentState == AppState.DOWNLOADING) "1 min" else "30 min"
+            LogUtils.send(context, "Polling service started. Interval: $intervalName")
+
             while (true) {
-                delay(30 * 60 * 1000L) // 30 分钟
+                // 动态计算心跳间隔
+                val heartbeatInterval = calculateHeartbeatInterval(context)
+
+                val intervalMinutes = heartbeatInterval / (60 * 1000)
+                LogUtils.send(context, "Next heartbeat: $intervalMinutes min")
+
+                delay(heartbeatInterval)
                 LogUtils.send(context, ">>> Auto Sync Triggered (Polling)")
                 checkUpdate(context)
+
+                // 检查下载是否完成，切换回稳定模式
+                checkAndSwitchState(context)
+            }
+        }
+    }
+
+    /**
+     * 重启轮询 (用于应用新的心跳间隔)
+     */
+    private fun restartPolling(context: Context) {
+        startPolling(context)
+    }
+
+    /**
+     * 计算心跳间隔
+     */
+    private fun calculateHeartbeatInterval(context: Context): Long {
+        return when (currentState) {
+            AppState.DOWNLOADING -> HEARTBEAT_FAST      // 1分钟
+            AppState.STABLE -> HEARTBEAT_STABLE         // 30分钟
+            AppState.IDLE -> HEARTBEAT_STABLE           // 30分钟
+        }
+    }
+
+    /**
+     * 检查并切换状态
+     */
+    private suspend fun checkAndSwitchState(context: Context) {
+        if (currentState == AppState.DOWNLOADING) {
+            val db = AppDatabase.getDatabase(context)
+            val pendingCount = db.appDao().getPendingSongs().size
+
+            if (pendingCount == 0) {
+                // 下载完成，切换回稳定模式
+                currentState = AppState.STABLE
+                LogUtils.send(context, "✅ 下载完成，切换到稳定心跳模式 (30 min)")
+                restartPolling(context)
             }
         }
     }

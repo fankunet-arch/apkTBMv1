@@ -1,6 +1,7 @@
 package com.toptea.tbm
 
 import android.content.Context
+import android.content.Intent
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -15,6 +16,10 @@ object DownloadManager {
     private const val TAG = "DownloadManager"
     private var isDownloading = false
 
+    // 广播 Action 常量
+    const val ACTION_SONG_READY = "com.toptea.tbm.ACTION_SONG_READY"
+    const val ACTION_DOWNLOAD_PROGRESS = "com.toptea.tbm.ACTION_DOWNLOAD_PROGRESS"
+
     // 启动下载任务 (会被 SyncManager 调用)
     fun startDownload(context: Context) {
         if (isDownloading) return // 防止重复启动
@@ -27,11 +32,18 @@ object DownloadManager {
 
             // 1. 找出所有没下载好的歌
             val pendingList = dao.getPendingSongs()
-            Log.d(TAG, "Pending songs count: ${pendingList.size}")
+            val totalCount = pendingList.size
+            Log.d(TAG, "Pending songs count: $totalCount")
+            LogUtils.send(context, "开始下载: $totalCount 首歌曲")
 
-            for (song in pendingList) {
+            // 发送初始进度
+            sendProgressBroadcast(context, 0, totalCount)
+
+            var completedCount = 0
+
+            for ((index, song) in pendingList.withIndex()) {
                 try {
-                    Log.d(TAG, "Downloading: ${song.title} (${song.downloadUrl})")
+                    Log.d(TAG, "Downloading [${index + 1}/$totalCount]: ${song.title} (${song.downloadUrl})")
 
                     // 2. 准备文件路径 (存放在 App 私有目录/music 下)
                     val musicDir = File(context.getExternalFilesDir(null), "music")
@@ -43,7 +55,9 @@ object DownloadManager {
                     // 3. 检查文件是否其实已经存在了 (断点续传的简化版：有文件且MD5对就不下了)
                     if (file.exists() && verifyMd5(file, song.md5)) {
                         Log.i(TAG, "File already exists and valid. Skipping.")
-                        markAsReady(dao, song, file.absolutePath)
+                        markAsReady(context, dao, song, file.absolutePath)
+                        completedCount++
+                        sendProgressBroadcast(context, completedCount, totalCount)
                         continue
                     }
 
@@ -66,7 +80,9 @@ object DownloadManager {
                     // 6. 下载后再次校验 MD5，确保文件没坏
                     if (verifyMd5(file, song.md5)) {
                         Log.i(TAG, "Download success: ${file.name}")
-                        markAsReady(dao, song, file.absolutePath)
+                        markAsReady(context, dao, song, file.absolutePath)
+                        completedCount++
+                        sendProgressBroadcast(context, completedCount, totalCount)
                     } else {
                         Log.e(TAG, "MD5 mismatch! Deleting corrupted file.")
                         file.delete()
@@ -78,14 +94,33 @@ object DownloadManager {
             }
 
             isDownloading = false
+            LogUtils.send(context, "下载完成: $completedCount/$totalCount 首歌曲")
             Log.d(TAG, "<<< Download Service Finished")
         }
     }
 
-    // 辅助：更新数据库状态为“已就绪”
-    private suspend fun markAsReady(dao: AppDao, song: LocalSong, path: String) {
+    // 辅助：更新数据库状态为"已就绪" + 发送广播
+    private suspend fun markAsReady(context: Context, dao: AppDao, song: LocalSong, path: String) {
         val newSong = song.copy(localPath = path, status = 2) // status=2 代表 Ready
         dao.insertOrUpdateSong(newSong)
+
+        // 关键：发送单曲就绪广播 (ACTION_SONG_READY)
+        val intent = Intent(ACTION_SONG_READY)
+        intent.putExtra("song_id", song.id)
+        intent.putExtra("song_path", path)
+        intent.putExtra("song_title", song.title)
+        context.sendBroadcast(intent)
+
+        Log.i(TAG, "✅ Song Ready Broadcast Sent: ${song.title}")
+        LogUtils.send(context, "✅ 歌曲就绪: ${song.title}")
+    }
+
+    // 辅助：发送下载进度广播
+    private fun sendProgressBroadcast(context: Context, completed: Int, total: Int) {
+        val intent = Intent(ACTION_DOWNLOAD_PROGRESS)
+        intent.putExtra("completed", completed)
+        intent.putExtra("total", total)
+        context.sendBroadcast(intent)
     }
 
     // 辅助：校验 MD5
