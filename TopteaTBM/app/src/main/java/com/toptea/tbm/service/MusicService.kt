@@ -158,25 +158,33 @@ class MusicService : Service() {
                 }
 
                 // ✅ 新增：监听播放状态变化，确保第一次播放时也能更新UI
-                override fun onPlaybackStateChanged(playbackState: Int) {
-                    // 当播放器准备好并且正在播放时，更新UI
-                    if (playbackState == Player.STATE_READY && isPlaying) {
-                        currentMediaItem?.let { mediaItem ->
-                            val songTitle = mediaItem.localConfiguration?.uri?.lastPathSegment ?: "Unknown"
+                override fun onIsPlayingChanged(isPlaying: Boolean) {
+                    if (isPlaying) {
+                        Log.d(TAG, "onIsPlayingChanged: isPlaying=true, checking current media item...")
 
-                            // 避免重复发送相同的状态
-                            if (currentSongTitle != songTitle) {
-                                Log.d(TAG, "Playback ready: $songTitle")
+                        // 使用协程延迟确保 currentMediaItem 已准备好
+                        serviceScope.launch(Dispatchers.Main) {
+                            delay(200) // 等待 200ms 确保 media item 完全加载
 
-                                // 更新当前播放标题
-                                currentSongTitle = songTitle
+                            player?.currentMediaItem?.let { mediaItem ->
+                                val songTitle = mediaItem.localConfiguration?.uri?.lastPathSegment ?: "Unknown"
 
-                                // 发送状态上报广播
-                                val intent = Intent(ACTION_NOW_PLAYING)
-                                intent.putExtra("song_title", songTitle)
-                                sendBroadcast(intent)
+                                // 避免重复发送相同的状态
+                                if (currentSongTitle != songTitle) {
+                                    Log.d(TAG, "Updating now playing: $songTitle")
 
-                                LogUtils.send(applicationContext, "▶️ Ready to play: $songTitle")
+                                    // 更新当前播放标题
+                                    currentSongTitle = songTitle
+
+                                    // 发送状态上报广播
+                                    val intent = Intent(ACTION_NOW_PLAYING)
+                                    intent.putExtra("song_title", songTitle)
+                                    sendBroadcast(intent)
+
+                                    LogUtils.send(applicationContext, "▶️ Now playing: $songTitle")
+                                }
+                            } ?: run {
+                                Log.w(TAG, "currentMediaItem is null after 200ms delay")
                             }
                         }
                     }
@@ -383,9 +391,27 @@ private fun loadAndPlayMusic() {
                     player?.play() // 确保开始播放
                     isPlaylistEmpty = false
 
-                    // ✅ 播放状态会由 onIsPlayingChanged 监听器自动更新
                     LogUtils.send(applicationContext, "✅ Playback started: ${songs.size} songs")
                     updateNotification("正在播放: ${playlist.name} (${songs.size} 首)")
+
+                    // ✅ 兜底方案：延迟后主动更新状态，确保 UI 一定会更新
+                    serviceScope.launch(Dispatchers.Main) {
+                        delay(500) // 等待播放器完全准备好
+                        player?.currentMediaItem?.let { mediaItem ->
+                            val songTitle = mediaItem.localConfiguration?.uri?.lastPathSegment ?: "Unknown"
+
+                            Log.d(TAG, "Fallback update: current playing = $songTitle")
+
+                            // 只在状态未更新时才发送（避免与监听器重复）
+                            if (currentSongTitle == "等待播放..." || currentSongTitle != songTitle) {
+                                currentSongTitle = songTitle
+                                val intent = Intent(ACTION_NOW_PLAYING)
+                                intent.putExtra("song_title", songTitle)
+                                sendBroadcast(intent)
+                                LogUtils.send(applicationContext, "🔄 Status updated (fallback): $songTitle")
+                            }
+                        }
+                    }
                 } else {
                     isPlaylistEmpty = true
                     LogUtils.send(applicationContext, "等待歌曲下载...")
