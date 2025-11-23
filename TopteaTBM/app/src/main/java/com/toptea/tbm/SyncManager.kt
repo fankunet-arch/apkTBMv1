@@ -46,7 +46,7 @@ object SyncManager {
                 if (mac == null) {
                     mac = UUID.randomUUID().toString()
                     dao.setConfig(AppConfig("device_mac", mac))
-                    LogUtils.send(context, "Generated New Device ID: $mac")
+                    LogUtils.send(context, "✅ Generated New Device ID: $mac")
 
                     // 发送 MAC 更新广播 (修复首次启动显示问题)
                     val macIntent = Intent(ACTION_MAC_UPDATED)
@@ -57,27 +57,33 @@ object SyncManager {
                 val currentVer = dao.getConfig("strategy_version") ?: "0"
 
                 // 2. 发起网络请求
-                LogUtils.send(context, "Connecting to server... (MAC: ${mac?.take(8)}...)")
+                LogUtils.send(context, "📡 Connecting to API...")
+                LogUtils.send(context, "URL: http://hqv3.toptea.es/smsys/api/check_update")
+                LogUtils.send(context, "MAC: ${mac?.take(12)}...")
+                LogUtils.send(context, "Version: $currentVer")
+
                 val request = CheckUpdateRequest(mac!!, currentVer)
 
                 val response = NetworkClient.apiService.checkUpdate(request)
 
                 // 3. 处理响应
+                LogUtils.send(context, "✅ API Response: ${response.status}")
+
                 when (response.status) {
                     "latest" -> {
-                        LogUtils.send(context, "System is up to date.")
+                        LogUtils.send(context, "✅ System is up to date.")
                     }
                     "update_required" -> {
-                        LogUtils.send(context, "Update found! Ver: ${response.new_version}")
+                        LogUtils.send(context, "🔄 Update found! Ver: ${response.new_version}")
                         response.config?.let { config ->
                             processConfig(context, dao, config, response.new_version)
                         }
                     }
                     "error" -> {
-                        LogUtils.send(context, "Server Error: ${response.status}") // 通常是未激活
+                        LogUtils.send(context, "❌ Server Error: ${response.status}") // 通常是未激活
                     }
                     else -> {
-                        LogUtils.send(context, "Unknown Status: ${response.status}")
+                        LogUtils.send(context, "⚠️ Unknown Status: ${response.status}")
                     }
                 }
 
@@ -85,7 +91,20 @@ object SyncManager {
                 WdsEngine.start()
 
             } catch (e: Exception) {
-                LogUtils.send(context, "Sync Failed: ${e.message}")
+                // ✅ 改进错误日志，显示详细的错误类型和消息
+                val errorType = e.javaClass.simpleName
+                val errorMsg = e.message ?: "Unknown error"
+
+                LogUtils.send(context, "❌ Sync Failed!")
+                LogUtils.send(context, "Error Type: $errorType")
+                LogUtils.send(context, "Error: $errorMsg")
+
+                // 如果是JSON解析错误，给出更明确的提示
+                if (errorType.contains("JsonSyntax") || errorType.contains("JsonParse")) {
+                    LogUtils.send(context, "⚠️ Server returned invalid JSON!")
+                    LogUtils.send(context, "Please check server API endpoint.")
+                }
+
                 e.printStackTrace()
             }
         }

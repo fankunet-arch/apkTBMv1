@@ -8,12 +8,14 @@ import java.util.concurrent.TimeUnit
 
 object NetworkClient {
 
-    private const val BASE_URL = "http://hqv3.toptea.es" // 您的服务器地址
+    // ⚠️ 重要: BASE_URL 必须以斜杠结尾，否则 Retrofit 路径拼接会出错
+    private const val BASE_URL = "http://hqv3.toptea.es/"
+    // 完整API端点: http://hqv3.toptea.es/smsys/api/check_update
 
     // 创建一个会打印日志的 HTTP 客户端，方便调试
     private val okHttpClient by lazy {
         val logging = HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BODY
+            level = HttpLoggingInterceptor.Level.BODY  // 打印完整请求和响应
         }
         OkHttpClient.Builder()
             .addInterceptor(logging)

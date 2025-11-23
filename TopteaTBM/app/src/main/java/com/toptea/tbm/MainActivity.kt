@@ -65,6 +65,9 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        // 0. ✅ 修复: 提前注册MAC更新接收器，确保能接收到首次生成的MAC
+        registerMacUpdateReceiver()
+
         // 1. 启动前台服务
         startMusicService()
 
@@ -95,6 +98,16 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // ✅ 新增辅助函数: 注册MAC更新接收器
+    private fun registerMacUpdateReceiver() {
+        val macUpdateFilter = IntentFilter(SyncManager.ACTION_MAC_UPDATED)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(macUpdateReceiver, macUpdateFilter, RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(macUpdateReceiver, macUpdateFilter)
+        }
+    }
+
     private fun initUI() {
         binding.tvStatus.text = "🟢 服务运行中"
         binding.tvNowPlaying.text = "🎵 等待播放..."
@@ -114,10 +127,16 @@ class MainActivity : AppCompatActivity() {
         mainScope.launch(Dispatchers.IO) {
             val db = AppDatabase.getDatabase(applicationContext)
             val dao = db.appDao()
-            val mac = dao.getConfig("device_mac") ?: "Unknown"
+            val mac = dao.getConfig("device_mac")
 
             withContext(Dispatchers.Main) {
-                binding.tvMacId.text = "MAC: $mac"
+                if (mac != null) {
+                    binding.tvMacId.text = "MAC: $mac"
+                } else {
+                    // ✅ 修复: 首次启动时显示"正在生成..."而非"Unknown"
+                    binding.tvMacId.text = "MAC: 正在生成..."
+                    LogUtils.send(applicationContext, "⏳ 等待生成设备ID...")
+                }
             }
         }
     }
@@ -241,13 +260,7 @@ class MainActivity : AppCompatActivity() {
             registerReceiver(downloadProgressReceiver, downloadProgressFilter)
         }
 
-        // 注册 MAC 更新接收器
-        val macUpdateFilter = IntentFilter(SyncManager.ACTION_MAC_UPDATED)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(macUpdateReceiver, macUpdateFilter, RECEIVER_NOT_EXPORTED)
-        } else {
-            registerReceiver(macUpdateReceiver, macUpdateFilter)
-        }
+        // ✅ 修复: MAC 更新接收器已在onCreate()中注册，此处无需重复注册
 
         // 立即检测一次音量
         checkVolume()
@@ -263,7 +276,7 @@ class MainActivity : AppCompatActivity() {
         try {
             unregisterReceiver(nowPlayingReceiver)
             unregisterReceiver(downloadProgressReceiver)
-            unregisterReceiver(macUpdateReceiver)
+            // ✅ 修复: MAC 更新接收器在onDestroy()中注销，此处无需注销
         } catch (e: Exception) {
             // 忽略重复注销错误
         }
@@ -273,6 +286,13 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
         volumeCheckJob?.cancel()
         mainScope.cancel()
+
+        // ✅ 修复: 在Activity销毁时注销MAC更新接收器
+        try {
+            unregisterReceiver(macUpdateReceiver)
+        } catch (e: Exception) {
+            // 忽略重复注销错误
+        }
     }
 
     private fun appendLog(text: String) {
