@@ -1,11 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <base-config cleartextTrafficPermitted="true">
+    <!-- ✅ 修复: 使用HTTPS，移除cleartext支持 -->
+    <base-config>
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>
     </base-config>
-    <domain-config cleartextTrafficPermitted="true">
+
+    <!-- HTTPS配置：信任系统证书 -->
+    <domain-config>
         <domain includeSubdomains="true">hqv3.toptea.es</domain>
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
     </domain-config>
 </network-security-config>

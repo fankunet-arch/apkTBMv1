@@ -58,7 +58,7 @@ object SyncManager {
 
                 // 2. 发起网络请求
                 LogUtils.send(context, "📡 Connecting to API...")
-                LogUtils.send(context, "URL: http://hqv3.toptea.es/smsys/api/check_update")
+                LogUtils.send(context, "URL: https://hqv3.toptea.es/smsys/api/check_update")
                 LogUtils.send(context, "MAC: ${mac?.take(12)}...")
                 LogUtils.send(context, "Version: $currentVer")
 
@@ -105,6 +105,7 @@ object SyncManager {
                         LogUtils.send(context, "⚠️ DNS解析失败!")
                         LogUtils.send(context, "无法解析域名: hqv3.toptea.es")
                         LogUtils.send(context, "请检查网络连接或DNS设置")
+                        LogUtils.send(context, "提示: 需要访问HTTPS服务")
                     }
                     errorType.contains("SocketTimeout") || errorType.contains("Timeout") -> {
                         LogUtils.send(context, "⚠️ 网络超时!")

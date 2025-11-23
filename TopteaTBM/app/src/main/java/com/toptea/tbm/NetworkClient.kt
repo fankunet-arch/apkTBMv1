@@ -8,9 +8,10 @@ import java.util.concurrent.TimeUnit
 
 object NetworkClient {
 
-    // ⚠️ 重要: BASE_URL 必须以斜杠结尾，否则 Retrofit 路径拼接会出错
-    private const val BASE_URL = "http://hqv3.toptea.es/"
-    // 完整API端点: http://hqv3.toptea.es/smsys/api/check_update
+    // ✅ 修复: 根据API文档使用正确的Base URL
+    // API文档: https://hqv3.toptea.es/smsys/api/
+    private const val BASE_URL = "https://hqv3.toptea.es/smsys/api/"
+    // 完整API端点: https://hqv3.toptea.es/smsys/api/check_update
 
     // 创建一个会打印日志的 HTTP 客户端，方便调试
     private val okHttpClient by lazy {
