@@ -19,6 +19,7 @@ object DownloadManager {
     // 广播 Action 常量
     const val ACTION_SONG_READY = "com.toptea.tbm.ACTION_SONG_READY"
     const val ACTION_DOWNLOAD_PROGRESS = "com.toptea.tbm.ACTION_DOWNLOAD_PROGRESS"
+    const val ACTION_DOWNLOAD_FINISHED = "com.toptea.tbm.ACTION_DOWNLOAD_FINISHED"
 
     // 启动下载任务 (会被 SyncManager 调用)
     fun startDownload(context: Context) {
@@ -98,6 +99,9 @@ object DownloadManager {
             // 发送最终进度 (确保 UI 显示正确的完成状态)
             sendProgressBroadcast(context, completedCount, totalCount)
 
+            // 发送下载结束广播 (包含最终结果)
+            sendFinishedBroadcast(context, completedCount, totalCount)
+
             if (completedCount < totalCount) {
                 LogUtils.send(context, "⚠️ 下载部分完成: $completedCount/$totalCount 首歌曲 (${totalCount - completedCount} 首失败)")
             } else {
@@ -132,13 +136,21 @@ object DownloadManager {
         context.sendBroadcast(intent)
     }
 
+    // 辅助：发送下载结束广播
+    private fun sendFinishedBroadcast(context: Context, completed: Int, total: Int) {
+        val intent = Intent(ACTION_DOWNLOAD_FINISHED)
+        intent.putExtra("completed", completed)
+        intent.putExtra("total", total)
+        context.sendBroadcast(intent)
+    }
+
     // 辅助：校验 MD5
     private fun verifyMd5(file: File, expectedMd5: String): Boolean {
         if (!file.exists()) return false
 
         // 严格校验：如果服务器没有提供有效的 MD5，拒绝下载
-        if (expectedMd5.isEmpty() || expectedMd5.length < 32) {
-            Log.e(TAG, "Invalid MD5 hash provided: $expectedMd5")
+        if (expectedMd5.length != 32) {
+            Log.e(TAG, "Security Alert: Invalid MD5 length provided!")
             return false
         }
 
