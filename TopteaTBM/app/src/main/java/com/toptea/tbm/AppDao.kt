@@ -50,7 +50,7 @@ interface AppDao {
     suspend fun clearAllPlaylists()
 
     // --- 配置操作 ---
-    @Query("SELECT value FROM app_config WHERE `key` = :key")
+    @Query("SELECT value FROM app_config WHERE config_key = :key")
     suspend fun getConfig(key: String): String?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
