@@ -101,13 +101,21 @@ class MusicService : Service() {
         // 3. 创建通知渠道 (Android 8.0+)
         createNotificationChannel()
 
-        // 4. 注册广播接收器 - 热重载
+        // 4. 注册广播接收器 - 热重载 (Android 14+ 需要指定 EXPORTED 标志)
         val playlistFilter = IntentFilter(SyncManager.ACTION_PLAYLIST_UPDATED)
-        registerReceiver(playlistUpdateReceiver, playlistFilter)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(playlistUpdateReceiver, playlistFilter, RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(playlistUpdateReceiver, playlistFilter)
+        }
 
         // 5. 注册紧急熔断接收器
         val killSwitchFilter = IntentFilter(ACTION_KILL_SWITCH)
-        registerReceiver(killSwitchReceiver, killSwitchFilter)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(killSwitchReceiver, killSwitchFilter, RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(killSwitchReceiver, killSwitchFilter)
+        }
 
         // 6. 启动心跳轮询
         SyncManager.startPolling(this)
