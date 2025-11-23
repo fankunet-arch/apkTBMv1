@@ -285,8 +285,14 @@ private fun loadAndPlayMusic() {
             Log.i(TAG, "No active slot for current time: $nowTimeStr")
             LogUtils.send(applicationContext, "⏸️ 非播放时段 ($nowTimeStr) - 待机中")
             updateNotification("非播放时段 - 待机中")
-            
-            withContext(Dispatchers.Main) { 
+
+            // ✅ 修复: 重置播放状态并通知UI
+            currentSongTitle = "等待播放..."
+            val statusIntent = Intent(ACTION_NOW_PLAYING)
+            statusIntent.putExtra("song_title", currentSongTitle)
+            sendBroadcast(statusIntent)
+
+            withContext(Dispatchers.Main) {
                 player?.stop()
             }
             return@launch
@@ -341,7 +347,8 @@ private fun loadAndPlayMusic() {
 
         // 检查当前是否已经在播放这个歌单 (防止频繁重置)
         if (isPlaying && !isPlaylistEmpty) {
-            // 继续播放，不重置播放列表
+            Log.i(TAG, "Already playing current playlist, skipping reload")
+            return@launch  // ✅ 修复: 添加return,避免重复加载
         }
         // --- END FIX 4 ---
 
@@ -424,8 +431,18 @@ private fun loadAndPlayMusic() {
             val deltaMillis = endTime.timeInMillis - currentTime.timeInMillis
 
             if (deltaMillis <= 0) {
-                Log.w(TAG, "End time already passed or invalid: $endTimeStr")
+                Log.w(TAG, "End time already passed: $endTimeStr")
                 LogUtils.send(applicationContext, "⏰ 当前时段已结束")
+
+                // ✅ 修复: 立即停止播放并重置状态
+                withContext(Dispatchers.Main) {
+                    player?.stop()
+                }
+                currentSongTitle = "等待播放..."
+                val statusIntent = Intent(ACTION_NOW_PLAYING)
+                statusIntent.putExtra("song_title", currentSongTitle)
+                sendBroadcast(statusIntent)
+                updateNotification("播放时段已结束")
                 return
             }
 
@@ -437,18 +454,24 @@ private fun loadAndPlayMusic() {
                 delay(deltaMillis)
 
                 // 时间到！执行停播
-                withContext(Dispatchers.Main) { 
-                    Log.w(TAG, "🛑 Stop Watchdog triggered! Stopping playback at $endTimeStr")
-                    LogUtils.send(applicationContext, "🛑 播放时段结束 ($endTimeStr)")
+                Log.w(TAG, "🛑 Stop Watchdog triggered! Stopping playback at $endTimeStr")
+                LogUtils.send(applicationContext, "🛑 播放时段结束 ($endTimeStr)")
 
+                // ✅ 修复: 重置播放状态
+                currentSongTitle = "等待播放..."
+                val statusIntent = Intent(ACTION_NOW_PLAYING)
+                statusIntent.putExtra("song_title", currentSongTitle)
+                sendBroadcast(statusIntent)
+
+                withContext(Dispatchers.Main) {
                     player?.stop()
-                    updateNotification("播放已停止 (时段结束)")
                 }
+                updateNotification("播放已停止 (时段结束)")
 
-                // 立即检查更新，看看是否有后续时段
+                // ✅ 修复: 使用 loadAndPlayMusic() 检查下一时段,而非 checkUpdate()
                 Log.i(TAG, "Checking for next time slot...")
                 LogUtils.send(applicationContext, ">>> 检查后续播放计划...")
-                SyncManager.checkUpdate(applicationContext)
+                loadAndPlayMusic()  // 直接检查本地策略
             }
 
         } catch (e: Exception) {

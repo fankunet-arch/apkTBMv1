@@ -73,12 +73,10 @@ class ApiController {
 
         // 5. 构建全量配置
         $config = [
-            'resources' => $this->db->query("SELECT id, file_md5 as md5, file_url as url, file_size as size FROM sm_songs WHERE is_active=1")->fetchAll(),
+            'resources' => $this->db->query("SELECT id, title, file_md5 as md5, file_url as url, file_size as size FROM sm_songs WHERE is_active=1")->fetchAll(),
             'playlists' => $this->fetchPlaylists(),
             'assignments' => $this->fetchAssignments(),
             'holiday_dates' => $this->fetchHolidays()
-			'resources' => $this->db->query("SELECT id, title, file_md5 as md5, file_url as url, file_size as size FROM sm_songs WHERE is_active=1")->fetchAll(),
-            'playlists' => $this->fetchPlaylists(),
         ];
 
         $this->jsonResponse([

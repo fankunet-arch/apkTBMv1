@@ -172,10 +172,9 @@ object SyncManager {
         val pendingCount = db.appDao().getPendingSongs().size
 
         if (pendingCount > 0) {
+            // ✅ 修复: 切换状态即可,轮询会在下次循环时自动使用新间隔
             currentState = AppState.DOWNLOADING
             LogUtils.send(context, "⚡ 切换到快速心跳模式 (${pendingCount}首待下载)")
-            // 重启轮询以应用新的心跳间隔
-            restartPolling(context)
         }
 
         DownloadManager.startDownload(context)
@@ -199,7 +198,7 @@ object SyncManager {
             LogUtils.send(context, "Polling service started. Interval: $intervalName")
 
             while (true) {
-                // 动态计算心跳间隔
+                // ✅ 修复: 每次循环都动态计算心跳间隔,无需重启协程
                 val heartbeatInterval = calculateHeartbeatInterval(context)
 
                 val intervalMinutes = heartbeatInterval / (60 * 1000)
@@ -209,7 +208,7 @@ object SyncManager {
                 LogUtils.send(context, ">>> Auto Sync Triggered (Polling)")
                 checkUpdate(context)
 
-                // 检查下载是否完成，切换回稳定模式
+                // ✅ 修复: 检查并切换状态,但不重启协程(下次循环会使用新间隔)
                 checkAndSwitchState(context)
             }
         }
@@ -242,10 +241,9 @@ object SyncManager {
             val pendingCount = db.appDao().getPendingSongs().size
 
             if (pendingCount == 0) {
-                // 下载完成，切换回稳定模式
+                // ✅ 修复: 切换状态后不重启协程,下次循环会自动使用新间隔
                 currentState = AppState.STABLE
                 LogUtils.send(context, "✅ 下载完成，切换到稳定心跳模式 (30 min)")
-                restartPolling(context)
             }
         }
     }

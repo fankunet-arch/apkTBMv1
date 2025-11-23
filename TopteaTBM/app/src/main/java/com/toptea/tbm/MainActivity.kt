@@ -171,7 +171,13 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateNowPlaying(songTitle: String) {
         runOnUiThread {
-            binding.tvNowPlaying.text = "🎵 正在播放: $songTitle"
+            // ✅ 修复: 当songTitle是"等待播放..."时,不显示"正在播放:"前缀
+            val displayText = if (songTitle == "等待播放...") {
+                "🎵 $songTitle"
+            } else {
+                "🎵 正在播放: $songTitle"
+            }
+            binding.tvNowPlaying.text = displayText
         }
     }
 
