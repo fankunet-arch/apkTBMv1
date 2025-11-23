@@ -99,12 +99,38 @@ object SyncManager {
                 LogUtils.send(context, "Error Type: $errorType")
                 LogUtils.send(context, "Error: $errorMsg")
 
-                // 如果是JSON解析错误，给出更明确的提示
-                if (errorType.contains("JsonSyntax") || errorType.contains("JsonParse")) {
-                    LogUtils.send(context, "⚠️ Server returned invalid JSON!")
-                    LogUtils.send(context, "Please check server API endpoint.")
+                // 🔍 添加详细的网络诊断信息
+                when {
+                    errorType.contains("UnknownHost") -> {
+                        LogUtils.send(context, "⚠️ DNS解析失败!")
+                        LogUtils.send(context, "无法解析域名: hqv3.toptea.es")
+                        LogUtils.send(context, "请检查网络连接或DNS设置")
+                    }
+                    errorType.contains("SocketTimeout") || errorType.contains("Timeout") -> {
+                        LogUtils.send(context, "⚠️ 网络超时!")
+                        LogUtils.send(context, "无法在30秒内连接到服务器")
+                        LogUtils.send(context, "请检查网络状态或防火墙设置")
+                    }
+                    errorType.contains("ConnectException") -> {
+                        LogUtils.send(context, "⚠️ 连接被拒绝!")
+                        LogUtils.send(context, "服务器可能未运行或端口被阻止")
+                    }
+                    errorType.contains("JsonSyntax") || errorType.contains("JsonParse") -> {
+                        LogUtils.send(context, "⚠️ Server returned invalid JSON!")
+                        LogUtils.send(context, "服务器可能返回了HTML错误页面")
+                        LogUtils.send(context, "Please check server API endpoint.")
+                    }
+                    errorType.contains("SSLException") || errorType.contains("Certificate") -> {
+                        LogUtils.send(context, "⚠️ SSL证书错误!")
+                        LogUtils.send(context, "请检查HTTPS配置")
+                    }
+                    else -> {
+                        LogUtils.send(context, "⚠️ 未知错误类型")
+                        LogUtils.send(context, "请查看详细日志")
+                    }
                 }
 
+                // 打印完整堆栈跟踪到Logcat
                 e.printStackTrace()
             }
         }
