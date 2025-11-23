@@ -99,11 +99,12 @@ object SyncManager {
             if (local == null) {
                 val newSong = LocalSong(
                     id = remoteSong.id,
-                    title = "Song_${remoteSong.id}",
+                    // ✅ FIX：从 RemoteSong.title 映射人可读名称到本地数据库
+                    title = remoteSong.title, 
                     md5 = remoteSong.md5,
                     downloadUrl = remoteSong.url,
                     fileSize = remoteSong.size,
-                    status = 0
+                    status = 0 // 状态 0: 未下载
                 )
                 dao.insertOrUpdateSong(newSong)
                 newCount++
@@ -149,7 +150,7 @@ object SyncManager {
             val playlistId = playlistIdStr.toIntOrNull() ?: return@forEach
             val playlist = LocalPlaylist(
                 id = playlistId,
-                name = "Playlist_$playlistId",
+                name = "Playlist_$playlistId", 
                 songIdsJson = gson.toJson(remotePlaylist.ids),
                 playMode = remotePlaylist.mode
             )

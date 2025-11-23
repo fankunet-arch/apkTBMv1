@@ -19,7 +19,6 @@ object DownloadManager {
     // 广播 Action 常量
     const val ACTION_SONG_READY = "com.toptea.tbm.ACTION_SONG_READY"
     const val ACTION_DOWNLOAD_PROGRESS = "com.toptea.tbm.ACTION_DOWNLOAD_PROGRESS"
-    const val ACTION_DOWNLOAD_FINISHED = "com.toptea.tbm.ACTION_DOWNLOAD_FINISHED"
 
     // 启动下载任务 (会被 SyncManager 调用)
     fun startDownload(context: Context) {
@@ -96,11 +95,12 @@ object DownloadManager {
 
             isDownloading = false
 
-            // 发送最终进度 (确保 UI 显示正确的完成状态)
-            sendProgressBroadcast(context, completedCount, totalCount)
-
-            // 发送下载结束广播 (包含最终结果)
-            sendFinishedBroadcast(context, completedCount, totalCount)
+            // 发送最终进度 (包含完成标记)
+            val finishIntent = Intent(ACTION_DOWNLOAD_PROGRESS)
+            finishIntent.putExtra("completed", completedCount)
+            finishIntent.putExtra("total", totalCount)
+            finishIntent.putExtra("is_finished", true) // <--- 新增标记：无论由于成败，循环已结束
+            context.sendBroadcast(finishIntent)
 
             if (completedCount < totalCount) {
                 LogUtils.send(context, "⚠️ 下载部分完成: $completedCount/$totalCount 首歌曲 (${totalCount - completedCount} 首失败)")
@@ -131,14 +131,6 @@ object DownloadManager {
     // 辅助：发送下载进度广播
     private fun sendProgressBroadcast(context: Context, completed: Int, total: Int) {
         val intent = Intent(ACTION_DOWNLOAD_PROGRESS)
-        intent.putExtra("completed", completed)
-        intent.putExtra("total", total)
-        context.sendBroadcast(intent)
-    }
-
-    // 辅助：发送下载结束广播
-    private fun sendFinishedBroadcast(context: Context, completed: Int, total: Int) {
-        val intent = Intent(ACTION_DOWNLOAD_FINISHED)
         intent.putExtra("completed", completed)
         intent.putExtra("total", total)
         context.sendBroadcast(intent)

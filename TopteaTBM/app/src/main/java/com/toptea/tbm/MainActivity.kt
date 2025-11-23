@@ -44,11 +44,8 @@ class MainActivity : AppCompatActivity() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val completed = intent?.getIntExtra("completed", 0) ?: 0
             val total = intent?.getIntExtra("total", 0) ?: 0
-            if (intent?.action == DownloadManager.ACTION_DOWNLOAD_FINISHED) {
-                handleDownloadFinished(completed, total)
-            } else {
-                updateDownloadProgress(completed, total)
-            }
+            val isFinished = intent?.getBooleanExtra("is_finished", false) ?: false
+            updateDownloadProgress(completed, total, isFinished)
         }
     }
 
@@ -178,52 +175,33 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun updateDownloadProgress(completed: Int, total: Int) {
+    private fun updateDownloadProgress(completed: Int, total: Int, isFinished: Boolean) {
         runOnUiThread {
             if (total > 0) {
-                // 更新状态文本
-                if (completed < total) {
-                    binding.tvStatus.text = "🔄 正在下载: $completed/$total"
-                } else {
-                    binding.tvStatus.text = "✅ 下载完成"
-                }
-
-                // 显示进度卡片
-                binding.cardDownloadProgress.visibility = View.VISIBLE
-                binding.tvDownloadProgressText.text = "正在同步资源: $completed/$total"
-
+                // 1. 更新状态文本
                 val progress = (completed * 100 / total).coerceIn(0, 100)
                 binding.progressBarDownload.progress = progress
-            } else {
-                binding.cardDownloadProgress.visibility = View.GONE
-            }
-        }
-    }
 
-    private fun handleDownloadFinished(completed: Int, total: Int) {
-        runOnUiThread {
-            if (total > 0) {
-                // 1. 最终更新一次进度条
-                binding.progressBarDownload.progress = (completed * 100 / total).coerceIn(0, 100)
-
-                // 2. 更新状态文本
-                if (completed < total) {
-                    binding.tvStatus.text = "⚠️ 下载结束 (${total - completed}首失败)"
-                    binding.tvDownloadProgressText.text = "下载结束: $completed/$total (有失败)"
+                // 2. 区分“进行中”与“结束”
+                if (!isFinished) {
+                    // [进行中]
+                    binding.cardDownloadProgress.visibility = View.VISIBLE
+                    binding.tvStatus.text = "🔄 正在下载: $completed/$total"
+                    binding.tvDownloadProgressText.text = "正在同步资源: $completed/$total"
                 } else {
-                    binding.tvStatus.text = "✅ 下载完成"
-                    binding.tvDownloadProgressText.text = "下载完成: $completed/$total"
-                }
+                    // [已结束] - 强制执行结算逻辑
+                    val statusText = if (completed == total) "✅ 下载完成" else "⚠️ 下载结束 ($completed/$total)"
+                    binding.tvStatus.text = statusText
+                    binding.tvDownloadProgressText.text = "同步结束"
 
-                // 3. 延迟后隐藏卡片并更新最终状态
-                mainScope.launch {
-                    delay(2000) // 2秒后隐藏
-                    binding.cardDownloadProgress.visibility = View.GONE
-
-                    if (completed < total) {
-                        binding.tvStatus.text = "🟡 部分失败"
-                    } else {
-                        binding.tvStatus.text = "🟢 服务运行中"
+                    // 延迟隐藏
+                    mainScope.launch {
+                        delay(3000)
+                        binding.cardDownloadProgress.visibility = View.GONE
+                        // 只有全部成功才恢复绿色，否则保留警告状态提醒运维
+                        if (completed == total) {
+                            binding.tvStatus.text = "🟢 服务运行中"
+                        }
                     }
                 }
             } else {
@@ -250,7 +228,6 @@ class MainActivity : AppCompatActivity() {
         // 注册下载进度接收器
         val downloadProgressFilter = IntentFilter().apply {
             addAction(DownloadManager.ACTION_DOWNLOAD_PROGRESS)
-            addAction(DownloadManager.ACTION_DOWNLOAD_FINISHED)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(downloadProgressReceiver, downloadProgressFilter, RECEIVER_NOT_EXPORTED)
