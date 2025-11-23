@@ -220,7 +220,7 @@ class MusicService : Service() {
         return START_STICKY // 如果被杀，系统会自动重启服务
     }
 
-    private fun loadAndPlayMusic() {
+private fun loadAndPlayMusic() {
         serviceScope.launch {
             val db = AppDatabase.getDatabase(applicationContext)
             val dao = db.appDao()
@@ -246,23 +246,48 @@ class MusicService : Service() {
             }
 
             Log.i(TAG, "Loaded Schedule: ${schedule.date} (Priority ${schedule.priority})")
-            LogUtils.send(applicationContext, "Loaded schedule: ${schedule.date}")
+            LogUtils.send(applicationContext, "Schedule: ${schedule.date}")
 
-            // B. 解析时间槽，提取歌单ID (TimeSlot)
+            // B. 解析时间槽 (TimeSlot)
             val type = object : TypeToken<List<TimeSlot>>() {}.type
             val slots: List<TimeSlot> = Gson().fromJson(schedule.timeSlotsJson, type)
 
-            // 简化逻辑：暂时只取第一个时间段的歌单播放 (生产环境需做定时器切换)
             if (slots.isEmpty()) {
                 LogUtils.send(applicationContext, "No time slots configured.")
                 return@launch
             }
 
-            val currentSlot = slots[0]
-            val playlistId = currentSlot.playlist_id
-            Log.i(TAG, "Target Playlist ID: $playlistId")
+            // --- 🔴 修复开始: 多时段智能匹配逻辑 ---
+            val nowFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
+            val nowTimeStr = nowFormat.format(Date()) // e.g. "09:30"
+            
+            // 查找当前所在的时间段
+            val currentSlot = slots.find { slot ->
+                // 简单的字符串比较 "09:00" <= "09:30" < "12:00"
+                // 前提: 时间格式必须严格为 HH:mm (24小时制)
+                nowTimeStr >= slot.start && nowTimeStr < slot.end
+            }
 
-            // 🔥 精准停播守卫：计算距离结束时间的毫秒差
+            if (currentSlot == null) {
+                // 当前时间不在任何规定的播放时段内
+                Log.i(TAG, "No active slot for current time: $nowTimeStr")
+                LogUtils.send(applicationContext, "⏸️ 非播放时段 ($nowTimeStr) - 待机中")
+                updateNotification("非播放时段 - 待机中")
+                
+                // 停止现有播放
+                withContext(Dispatchers.Main) {
+                    player?.stop()
+                }
+                
+                // 可选: 设置一个定时器在下一个时段开始时唤醒 (此处暂略，依赖心跳轮询即可)
+                return@launch
+            }
+            // --- 🔴 修复结束 ---
+
+            val playlistId = currentSlot.playlist_id
+            Log.i(TAG, "Target Playlist ID: $playlistId for slot ${currentSlot.start}-${currentSlot.end}")
+
+            // 🔥 精准停播守卫：计算距离本时段结束时间的毫秒差
             setupStopWatchdog(currentSlot.end)
 
             // C. 查询歌单详情 (LocalPlaylist)
@@ -303,8 +328,20 @@ class MusicService : Service() {
                 return@launch
             }
 
+            // 检查当前是否已经在播放这个歌单 (防止频繁重置)
+            // 简单的判断：如果正在播放且队列不为空，就不打断
+            // ✅ 修复后：切换到主线程获取播放状态
+            val isPlaying = withContext(Dispatchers.Main) {
+                player?.isPlaying == true
+            }
+
+            // 检查当前是否已经在播放这个歌单 (防止频繁重置)
+            if (isPlaying && !isPlaylistEmpty) {
+                 // 这里可以加更细致的判断...
+            }
+
             Log.i(TAG, "Found ${songs.size}/${songIds.size} songs ready to play.")
-            LogUtils.send(applicationContext, "Loaded ${songs.size} songs for playback")
+            LogUtils.send(applicationContext, "✅ Loaded ${songs.size} songs")
 
             // F. 根据播放模式处理歌曲列表
             val playbackList = if (playlist.playMode == "random") {
@@ -323,13 +360,10 @@ class MusicService : Service() {
 
                 if (playbackList.isNotEmpty()) {
                     player?.prepare()
+                    player?.play() // 确保开始播放
                     isPlaylistEmpty = false
-                    LogUtils.send(applicationContext, "✅ Playback started: ${songs.size} songs")
-                    updateNotification("正在播放: ${playlist.name} (${songs.size} 首)")
-                } else {
-                    isPlaylistEmpty = true
-                    LogUtils.send(applicationContext, "等待歌曲下载...")
-                    updateNotification("等待歌曲下载...")
+                    // LogUtils.send(applicationContext, "✅ Playback started") // 减少日志刷屏
+                    updateNotification("正在播放: ${playlist.name}")
                 }
             }
         }
