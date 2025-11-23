@@ -156,6 +156,27 @@ class MusicService : Service() {
                         LogUtils.send(applicationContext, "▶️ Now Playing: $songTitle")
                     }
                 }
+
+                // ✅ 新增：监听播放状态变化，确保第一次播放时也能更新UI
+                override fun onIsPlayingChanged(isPlaying: Boolean) {
+                    if (isPlaying) {
+                        // 当开始播放时，立即获取当前播放的歌曲并更新UI
+                        currentMediaItem?.let { mediaItem ->
+                            val songTitle = mediaItem.localConfiguration?.uri?.lastPathSegment ?: "Unknown"
+                            Log.d(TAG, "Playback started: $songTitle")
+
+                            // 更新当前播放标题
+                            currentSongTitle = songTitle
+
+                            // 发送状态上报广播
+                            val intent = Intent(ACTION_NOW_PLAYING)
+                            intent.putExtra("song_title", songTitle)
+                            sendBroadcast(intent)
+
+                            LogUtils.send(applicationContext, "▶️ Playback started: $songTitle")
+                        }
+                    }
+                }
             })
         }
 
@@ -354,19 +375,11 @@ private fun loadAndPlayMusic() {
                 }
 
                 if (playbackList.isNotEmpty()) {
-                    // 使用播放列表中的第一个歌曲标题作为初始显示
-                    val firstSongTitle = playbackList.first().title 
-                    
                     player?.prepare()
                     player?.play() // 确保开始播放
                     isPlaylistEmpty = false
 
-                    // ✅ FIX 1：手动设置状态变量并发送广播给 Activity
-                    currentSongTitle = firstSongTitle
-                    val statusIntent = Intent(ACTION_NOW_PLAYING)
-                    statusIntent.putExtra("song_title", firstSongTitle)
-                    sendBroadcast(statusIntent)
-                    
+                    // ✅ 播放状态会由 onIsPlayingChanged 监听器自动更新
                     LogUtils.send(applicationContext, "✅ Playback started: ${songs.size} songs")
                     updateNotification("正在播放: ${playlist.name} (${songs.size} 首)")
                 } else {
