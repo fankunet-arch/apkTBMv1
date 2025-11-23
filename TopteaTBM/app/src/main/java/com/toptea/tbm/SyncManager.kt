@@ -26,6 +26,7 @@ object SyncManager {
     }
 
     // 当前应用状态
+    @Volatile
     private var currentState: AppState = AppState.STABLE
 
     // 心跳间隔常量 (毫秒)
@@ -174,8 +175,7 @@ object SyncManager {
         if (pendingCount > 0) {
             currentState = AppState.DOWNLOADING
             LogUtils.send(context, "⚡ 切换到快速心跳模式 (${pendingCount}首待下载)")
-            // 重启轮询以应用新的心跳间隔
-            restartPolling(context)
+            // ✅ 状态改变会在下次轮询循环时自动应用新的间隔
         }
 
         DownloadManager.startDownload(context)
@@ -195,31 +195,25 @@ object SyncManager {
         pollingJob?.cancel()
 
         pollingJob = CoroutineScope(Dispatchers.IO).launch {
-            val intervalName = if (currentState == AppState.DOWNLOADING) "1 min" else "30 min"
-            LogUtils.send(context, "Polling service started. Interval: $intervalName")
+            LogUtils.send(context, "✅ Polling service started")
 
             while (true) {
-                // 动态计算心跳间隔
+                // ✅ 每次循环都动态计算心跳间隔
                 val heartbeatInterval = calculateHeartbeatInterval(context)
-
                 val intervalMinutes = heartbeatInterval / (60 * 1000)
-                LogUtils.send(context, "Next heartbeat: $intervalMinutes min")
+
+                LogUtils.send(context, "⏰ Next heartbeat in: $intervalMinutes min (State: $currentState)")
 
                 delay(heartbeatInterval)
+
+                // 执行心跳检查
                 LogUtils.send(context, ">>> Auto Sync Triggered (Polling)")
                 checkUpdate(context)
 
-                // 检查下载是否完成，切换回稳定模式
+                // 检查下载是否完成,切换回稳定模式
                 checkAndSwitchState(context)
             }
         }
-    }
-
-    /**
-     * 重启轮询 (用于应用新的心跳间隔)
-     */
-    private fun restartPolling(context: Context) {
-        startPolling(context)
     }
 
     /**
@@ -242,10 +236,15 @@ object SyncManager {
             val pendingCount = db.appDao().getPendingSongs().size
 
             if (pendingCount == 0) {
-                // 下载完成，切换回稳定模式
+                // 下载完成,切换回稳定模式
                 currentState = AppState.STABLE
-                LogUtils.send(context, "✅ 下载完成，切换到稳定心跳模式 (30 min)")
-                restartPolling(context)
+                LogUtils.send(context, "✅ 下载完成,切换到稳定心跳模式 (30 min)")
+
+                // ✅ 修复: 下载完成后立即触发播放检查
+                // 通知 MusicService 重新加载播放列表
+                LogUtils.send(context, "🎵 触发播放检查 (歌曲下载完成)")
+                val intent = android.content.Intent(ACTION_PLAYLIST_UPDATED)
+                context.sendBroadcast(intent)
             }
         }
     }

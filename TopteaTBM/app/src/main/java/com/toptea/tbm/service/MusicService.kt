@@ -73,10 +73,17 @@ class MusicService : Service() {
             Log.w(TAG, "KILL SWITCH ACTIVATED - Device Blocked")
             LogUtils.send(applicationContext, "⚠️ KILL SWITCH: Device blocked, stopping playback")
             // 熔断操作涉及播放器状态改变，必须切换到主线程
-            serviceScope.launch(Dispatchers.Main) { 
+            serviceScope.launch(Dispatchers.Main) {
                 player?.stop()
                 player?.clearMediaItems()
                 updateNotification("设备已被阻止 (Device Blocked)")
+
+                // ✅ 重置状态
+                currentSongTitle = "设备已被阻止"
+                isPlaylistEmpty = true
+                val statusIntent = Intent(ACTION_NOW_PLAYING)
+                statusIntent.putExtra("song_title", currentSongTitle)
+                sendBroadcast(statusIntent)
             }
         }
     }
@@ -258,6 +265,14 @@ private fun loadAndPlayMusic() {
             Log.w(TAG, "No schedule found for today.")
             LogUtils.send(applicationContext, "今日无排期 - 静默中")
             updateNotification("今日无排期 - 静默中")
+
+            // ✅ 重置状态
+            currentSongTitle = "等待播放..."
+            isPlaylistEmpty = true
+            val statusIntent = Intent(ACTION_NOW_PLAYING)
+            statusIntent.putExtra("song_title", currentSongTitle)
+            sendBroadcast(statusIntent)
+
             return@launch
         }
 
@@ -273,22 +288,31 @@ private fun loadAndPlayMusic() {
             return@launch
         }
 
-        // --- 多时段智能匹配逻辑 ---
-        val nowFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
-        val nowTimeStr = nowFormat.format(Date()) 
-        
+        // --- 多时段智能匹配逻辑 (支持跨午夜) ---
+        val now = Calendar.getInstance()
+        val currentMinutes = now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE)
+
         val currentSlot = slots.find { slot ->
-            nowTimeStr >= slot.start && nowTimeStr < slot.end
+            isTimeInSlot(currentMinutes, slot.start, slot.end)
         }
 
         if (currentSlot == null) {
+            val nowTimeStr = String.format("%02d:%02d", now.get(Calendar.HOUR_OF_DAY), now.get(Calendar.MINUTE))
             Log.i(TAG, "No active slot for current time: $nowTimeStr")
             LogUtils.send(applicationContext, "⏸️ 非播放时段 ($nowTimeStr) - 待机中")
             updateNotification("非播放时段 - 待机中")
-            
-            withContext(Dispatchers.Main) { 
+
+            withContext(Dispatchers.Main) {
                 player?.stop()
             }
+
+            // ✅ 重置状态,确保UI显示正确
+            currentSongTitle = "等待播放..."
+            isPlaylistEmpty = true
+            val statusIntent = Intent(ACTION_NOW_PLAYING)
+            statusIntent.putExtra("song_title", currentSongTitle)
+            sendBroadcast(statusIntent)
+
             return@launch
         }
         // --- END 多时段逻辑 ---
@@ -305,6 +329,14 @@ private fun loadAndPlayMusic() {
             Log.w(TAG, "Playlist $playlistId not found in DB")
             LogUtils.send(applicationContext, "歌单 #$playlistId 未找到，等待同步...")
             updateNotification("等待同步歌单...")
+
+            // ✅ 重置状态
+            currentSongTitle = "等待播放..."
+            isPlaylistEmpty = true
+            val statusIntent = Intent(ACTION_NOW_PLAYING)
+            statusIntent.putExtra("song_title", currentSongTitle)
+            sendBroadcast(statusIntent)
+
             return@launch
         }
 
@@ -331,6 +363,14 @@ private fun loadAndPlayMusic() {
             Log.w(TAG, "No songs ready for playback yet.")
             LogUtils.send(applicationContext, "歌曲下载中...")
             updateNotification("正在下载歌曲...")
+
+            // ✅ 重置状态
+            currentSongTitle = "等待播放..."
+            isPlaylistEmpty = true
+            val statusIntent = Intent(ACTION_NOW_PLAYING)
+            statusIntent.putExtra("song_title", currentSongTitle)
+            sendBroadcast(statusIntent)
+
             return@launch
         }
 
@@ -342,6 +382,9 @@ private fun loadAndPlayMusic() {
         // 检查当前是否已经在播放这个歌单 (防止频繁重置)
         if (isPlaying && !isPlaylistEmpty) {
             // 继续播放，不重置播放列表
+            Log.i(TAG, "Already playing, skip reload to prevent interruption")
+            LogUtils.send(applicationContext, "✅ 播放中，跳过重载")
+            return@launch
         }
         // --- END FIX 4 ---
 
@@ -397,6 +440,34 @@ private fun loadAndPlayMusic() {
 }
 
     /**
+     * 检查当前时间是否在指定时间段内 (支持跨午夜)
+     * @param currentMinutes 当前时间的分钟数 (从午夜开始)
+     * @param startStr 开始时间字符串 "HH:mm"
+     * @param endStr 结束时间字符串 "HH:mm"
+     * @return 是否在时间段内
+     */
+    private fun isTimeInSlot(currentMinutes: Int, startStr: String, endStr: String): Boolean {
+        try {
+            val startParts = startStr.split(":")
+            val endParts = endStr.split(":")
+
+            val startMinutes = startParts[0].toInt() * 60 + startParts[1].toInt()
+            val endMinutes = endParts[0].toInt() * 60 + endParts[1].toInt()
+
+            return if (startMinutes <= endMinutes) {
+                // 正常时段: 例如 08:00 - 18:00
+                currentMinutes >= startMinutes && currentMinutes < endMinutes
+            } else {
+                // 跨午夜时段: 例如 23:00 - 01:00
+                currentMinutes >= startMinutes || currentMinutes < endMinutes
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error parsing time slot: $startStr - $endStr", e)
+            return false
+        }
+    }
+
+    /**
      * 精准停播守卫 (Precision Stop Watchdog)
      * 在指定的结束时间自动停止播放，并触发策略检查
      */
@@ -437,12 +508,19 @@ private fun loadAndPlayMusic() {
                 delay(deltaMillis)
 
                 // 时间到！执行停播
-                withContext(Dispatchers.Main) { 
+                withContext(Dispatchers.Main) {
                     Log.w(TAG, "🛑 Stop Watchdog triggered! Stopping playback at $endTimeStr")
                     LogUtils.send(applicationContext, "🛑 播放时段结束 ($endTimeStr)")
 
                     player?.stop()
                     updateNotification("播放已停止 (时段结束)")
+
+                    // ✅ 重置状态
+                    currentSongTitle = "等待播放..."
+                    isPlaylistEmpty = true
+                    val statusIntent = Intent(ACTION_NOW_PLAYING)
+                    statusIntent.putExtra("song_title", currentSongTitle)
+                    sendBroadcast(statusIntent)
                 }
 
                 // 立即检查更新，看看是否有后续时段
