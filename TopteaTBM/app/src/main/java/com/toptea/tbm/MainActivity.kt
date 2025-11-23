@@ -160,9 +160,13 @@ class MainActivity : AppCompatActivity() {
             logReceiver, IntentFilter("com.toptea.tbm.LOG_UPDATE")
         )
 
-        // 注册 Now Playing 接收器
+        // 注册 Now Playing 接收器 (Android 14+ 需要指定 EXPORTED 标志)
         val nowPlayingFilter = IntentFilter(MusicService.ACTION_NOW_PLAYING)
-        registerReceiver(nowPlayingReceiver, nowPlayingFilter)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(nowPlayingReceiver, nowPlayingFilter, RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(nowPlayingReceiver, nowPlayingFilter)
+        }
 
         // 立即检测一次音量
         checkVolume()
